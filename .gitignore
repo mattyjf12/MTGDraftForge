@@ -1,0 +1,53 @@
+# Android release signing — NEVER commit these
+android/keystore.properties
+android/app/*.keystore
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# React Native
+.expo/
+dist/
+
+# iOS
+ios/Pods/
+ios/build/
+ios/DerivedData/
+ios/*.ipa
+ios/MTGDraftForge.xcworkspace/xcshareddata/
+*.xcuserstate
+
+# Android
+android/build/
+android/app/build/
+android/local.properties
+android/.gradle/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+google-services.json
+GoogleService-Info.plist
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+__MACOSX/
+
+# Claude Code internal
+.claude/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Misc artefacts
+*.log
+*.tsbuildinfo

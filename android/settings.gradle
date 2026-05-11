@@ -1,0 +1,9 @@
+rootProject.name = 'MTGDraftForge'
+
+// Use Node 20 from nvm; override the PATH so all `node` invocations use the right version
+def nvmNode = "${System.getenv('HOME')}/.nvm/versions/node/v20.20.2/bin"
+System.setProperty("PATH", nvmNode + ":" + System.getenv("PATH"))
+
+apply from: file("../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesSettingsGradle(settings)
+include ':app'
+includeBuild('../node_modules/@react-native/gradle-plugin')
