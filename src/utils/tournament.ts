@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────
 // MTG Draft Forge — Tournament Logic
 // ─────────────────────────────────────────────
-import { BracketMatch, Player, RRResult, RRResultKey, StandingsEntry, DraftRoom, MTGARecord, MTGAMatchup, MTGARound } from './types';
+import { BracketMatch, Player, RRResult, RRResultKey, StandingsEntry, DraftRoom, MTGARecord, MTGAMatchup, MTGARound, CommanderPod } from './types';
 import { FormatId, getSuggestedFormat } from '../theme';
 
 // ── Helpers ───────────────────────────────────
@@ -453,6 +453,38 @@ export function computeStandings(room: DraftRoom): StandingsEntry[] {
         entry.isEliminated = !rec.active; // active=false means 3 losses
       }
     });
+  } else if (effectiveFormat === 'commander' && room.commanderPods) {
+    const completedPods = room.commanderPods.filter((p: CommanderPod) => !!p.results);
+    if (completedPods.length > 0) {
+      // For each player keep the record from their highest completed round.
+      const playerRecord: Record<string, { round: number; placement: number }> = {};
+      completedPods.forEach((pod: CommanderPod) => {
+        pod.results!.forEach(r => {
+          const existing = playerRecord[r.playerId];
+          if (!existing || pod.round > existing.round) {
+            playerRecord[r.playerId] = { round: pod.round, placement: r.placement };
+          }
+        });
+      });
+      base.forEach(entry => {
+        const rec = playerRecord[entry.playerId];
+        if (rec?.placement === 1) { entry.wins = 1; entry.matchPoints = 3; }
+      });
+      base.sort((a, b) => {
+        const ar = playerRecord[a.playerId];
+        const br = playerRecord[b.playerId];
+        if (!ar && !br) return a.playerName.localeCompare(b.playerName);
+        if (!ar) return 1;
+        if (!br) return -1;
+        if (ar.round !== br.round) return br.round - ar.round; // higher round = better
+        if (ar.placement !== br.placement) return ar.placement - br.placement; // 1st beats 2nd
+        return a.playerName.localeCompare(b.playerName);
+      });
+    } else {
+      base.sort((a, b) => a.playerName.localeCompare(b.playerName));
+    }
+    base.forEach((e, i) => { e.rank = i + 1; });
+    return base;
   } else if (room.bracket) {
     // Bracket-based (single_elim, double_elim, seeded, two_phase phase 2)
     room.bracket.forEach(match => {

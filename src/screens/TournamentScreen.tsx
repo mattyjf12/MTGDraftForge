@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert,
-  Modal, TextInput,
+  Modal, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -14,6 +14,7 @@ import { maybeProposeReview } from '../services/reviewPrompt';
 import { RoomsStackParams } from '../navigation/RootNavigator';
 import { computeStandings, generateMultiGameRRSchedule, generateFixedGamesSchedule } from '../utils/tournament';
 import { MTGColor } from '../utils/types';
+import VictoryOverlay from '../components/VictoryOverlay';
 
 type Nav = NativeStackNavigationProp<RoomsStackParams>;
 type Route = RouteProp<RoomsStackParams, 'Tournament'>;
@@ -37,7 +38,7 @@ function NavTile({ icon, label, onPress, disabled }: {
 export default function TournamentScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
-  const { state, dispatch, addBot, removeBot } = useApp();
+  const { state, dispatch, addBot, removeBot, renameBot } = useApp();
 
   const room = state.rooms.find(r => r.id === route.params.roomId);
 
@@ -45,6 +46,10 @@ export default function TournamentScreen() {
   const [deckModal, setDeckModal] = useState(false);
   const [deckName, setDeckName] = useState(myPlayer?.deckName ?? '');
   const [deckColors, setDeckColors] = useState<MTGColor[]>(myPlayer?.deckColors ?? []);
+  const [renameBotModal, setRenameBotModal] = useState(false);
+  const [renameBotId, setRenameBotId] = useState('');
+  const [renameBotName, setRenameBotName] = useState('');
+  const [showVictory, setShowVictory] = useState(false);
 
   // Fire review prompt 3 seconds after the tournament completes.
   // prevStatusRef lets us detect the exact moment it flips to 'completed'.
@@ -53,6 +58,7 @@ export default function TournamentScreen() {
     if (!room) return;
     if (room.status === 'completed' && prevStatusRef.current !== 'completed') {
       haptic('notificationSuccess');
+      setShowVictory(true);
       const timer = setTimeout(() => maybeProposeReview(), 3000);
       return () => clearTimeout(timer);
     }
@@ -92,6 +98,8 @@ export default function TournamentScreen() {
   const standings = computeStandings(room);
   const hasStarted = room.status === 'in_progress' || room.status === 'completed';
   const isOwner = room.ownerId === state.currentUserId;
+  const isRoundRobin = effectiveFmt === 'round_robin';
+  const champion = room.status === 'completed' ? standings[0] : null;
 
   // Format helpers
   const isTwoPhase = effectiveFmt === 'two_phase';
@@ -196,12 +204,24 @@ export default function TournamentScreen() {
                 </TouchableOpacity>
               )}
               {p.isBot && isOwner && !hasStarted && (
-                <TouchableOpacity
-                  style={styles.removeBotBtn}
-                  onPress={() => removeBot(room.id, p.id)}
-                >
-                  <Text style={styles.removeBotText}>✕</Text>
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity
+                    style={styles.pencilBtn}
+                    onPress={() => {
+                      setRenameBotId(p.id);
+                      setRenameBotName(p.name);
+                      setRenameBotModal(true);
+                    }}
+                  >
+                    <Text style={styles.pencilBtnText}>✏️</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.removeBotBtn}
+                    onPress={() => removeBot(room.id, p.id)}
+                  >
+                    <Text style={styles.removeBotText}>✕</Text>
+                  </TouchableOpacity>
+                </>
               )}
             </View>
           ))}
@@ -220,6 +240,7 @@ export default function TournamentScreen() {
           animationType="slide"
           onRequestClose={() => setDeckModal(false)}
         >
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>🎴 My Deck</Text>
@@ -289,6 +310,43 @@ export default function TournamentScreen() {
               </Row>
             </View>
           </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        {/* Rename bot modal */}
+        <Modal
+          visible={renameBotModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setRenameBotModal(false)}
+        >
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Rename Bot</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={renameBotName}
+                onChangeText={setRenameBotName}
+                maxLength={20}
+                autoFocus
+                selectTextOnFocus
+                placeholderTextColor={Colors.textFaint}
+              />
+              <View style={styles.modalActions}>
+                <Button
+                  label="Save"
+                  onPress={() => {
+                    const trimmed = renameBotName.trim();
+                    if (trimmed) renameBot(room.id, renameBotId, trimmed);
+                    setRenameBotModal(false);
+                  }}
+                />
+                <Button label="Cancel" variant="ghost" onPress={() => setRenameBotModal(false)} />
+              </View>
+            </View>
+          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* Tournament controls / nav */}
@@ -410,6 +468,31 @@ export default function TournamentScreen() {
               );
             })()}
 
+            {/* Champion banner — shown for all completed tournament types */}
+            {champion && (() => {
+              const championPlayer = room.players.find(p => p.id === champion.playerId);
+              return (
+                <Card gold style={{ alignItems: 'center', paddingVertical: Spacing.xl }}>
+                  <Text style={{ fontSize: 40, marginBottom: Spacing.sm }}>🏆</Text>
+                  <Text style={styles.ctaTitle}>Tournament Complete!</Text>
+                  <Text style={[styles.ctaSub, { fontSize: 16, color: Colors.goldLight, fontFamily: 'Georgia', marginBottom: 4 }]}>
+                    {champion.playerName}
+                  </Text>
+                  <Text style={styles.ctaSub}>{champion.wins}W – {champion.losses}L</Text>
+                  {(championPlayer?.deckColors?.length || championPlayer?.deckName) ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm }}>
+                      {championPlayer?.deckColors && championPlayer.deckColors.length > 0 && (
+                        <MTGColorPips colors={championPlayer.deckColors} size="md" />
+                      )}
+                      {championPlayer?.deckName ? (
+                        <Text style={styles.ctaSub}>{championPlayer.deckName}</Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                </Card>
+              );
+            })()}
+
             {/* Mini standings preview */}
             {standings.length > 0 && !isCommander && (
               <Card>
@@ -479,6 +562,16 @@ export default function TournamentScreen() {
           </>
         )}
       </ScrollView>
+
+      <VictoryOverlay
+        visible={showVictory}
+        winnerName={champion?.playerName ?? ''}
+        wins={champion?.wins ?? 0}
+        losses={champion?.losses ?? 0}
+        deckName={room.players.find(p => p.id === champion?.playerId)?.deckName}
+        deckColors={room.players.find(p => p.id === champion?.playerId)?.deckColors}
+        onDismiss={() => setShowVictory(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -547,6 +640,27 @@ const styles = StyleSheet.create({
   addBotIcon: { fontSize: 18 },
   addBotLabel: { ...Typography.bodySM, color: Colors.textMuted },
   modalOverlay: { flex: 1, backgroundColor: Colors.bgOverlay, justifyContent: 'flex-end' },
+  modalBox: {
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
+    borderColor: Colors.borderGold,
+    borderRadius: Radius.xl,
+    padding: Spacing.xl,
+    marginHorizontal: Spacing.xl,
+    marginBottom: Spacing.xxxl,
+  },
+  modalInput: {
+    backgroundColor: Colors.bgSurface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    padding: Spacing.sm,
+    color: Colors.text,
+    fontSize: 15,
+    fontFamily: 'System',
+    marginBottom: Spacing.md,
+  },
+  modalActions: { gap: Spacing.sm },
   modalCard: {
     backgroundColor: Colors.bgCard,
     borderTopWidth: 1,

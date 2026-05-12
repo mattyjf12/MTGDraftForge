@@ -104,7 +104,25 @@ export default function RoomsListScreen() {
           text: 'Delete', style: 'destructive',
           onPress: () => {
             dispatch({ type: 'DELETE_ROOM', roomId: room.id });
-            deleteRoomFromFirestore(room.id); // notify all other devices via Firestore
+            deleteRoomFromFirestore(room.id);
+          },
+        },
+      ]
+    );
+  }
+
+  function deleteAllRooms() {
+    if (state.rooms.length === 0) return;
+    Alert.alert(
+      'Delete All Rooms',
+      `This will permanently delete all ${state.rooms.length} room${state.rooms.length !== 1 ? 's' : ''}. This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete All', style: 'destructive',
+          onPress: () => {
+            state.rooms.forEach(r => deleteRoomFromFirestore(r.id));
+            dispatch({ type: 'DELETE_ALL_ROOMS' });
           },
         },
       ]
@@ -128,6 +146,14 @@ export default function RoomsListScreen() {
           style={{ flex: 1 }}
         />
       </View>
+
+      {/* Delete All Rooms button — hidden for now
+      {state.rooms.length > 0 && (
+        <TouchableOpacity style={styles.deleteAllBtn} onPress={deleteAllRooms}>
+          <Text style={styles.deleteAllText}>🗑 Delete All Rooms</Text>
+        </TouchableOpacity>
+      )}
+      */}
 
       {/* Your name pill */}
       <View style={styles.namePill}>
@@ -233,4 +259,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   deleteBtnText: { color: Colors.redLight, fontSize: 14 },
+  deleteAllBtn: {
+    alignSelf: 'center',
+    marginBottom: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.lg,
+  },
+  deleteAllText: { ...Typography.bodySM, color: Colors.redLight, letterSpacing: 0.5 },
 });

@@ -4,7 +4,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, Modal, SafeAreaView, Image,
+  TextInput, Modal, SafeAreaView, Image, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { Colors, Spacing, Radius, Typography, FORMATS } from '../theme';
 import { Card, Row, Divider, EmptyState, Badge, SectionHeader, PlayerAvatar } from '../components/UI';
@@ -118,6 +118,7 @@ export default function ProfileScreen() {
           animationType="slide"
           onRequestClose={() => setAvatarModalVisible(false)}
         >
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={s.modalOverlay}>
             <View style={s.modalCard}>
               <Text style={s.modalTitle}>Set Avatar Image</Text>
@@ -169,6 +170,7 @@ export default function ProfileScreen() {
               </View>
             </View>
           </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* Emoji picker modal (fallback avatar) */}

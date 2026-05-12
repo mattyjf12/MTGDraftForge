@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Modal, TextInput,
-  TouchableOpacity, Alert,
+  TouchableOpacity, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, RouteProp } from '@react-navigation/native';
@@ -284,6 +284,7 @@ function RoundRobinBracket({ roomId, isTwoPhase = false }: { roomId: string; isT
 
       {modal && (
         <Modal transparent animationType="slide" onRequestClose={() => setModal(null)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>📝 Log Match</Text>
@@ -320,6 +321,7 @@ function RoundRobinBracket({ roomId, isTwoPhase = false }: { roomId: string; isT
               </Row>
             </View>
           </View>
+          </KeyboardAvoidingView>
         </Modal>
       )}
 

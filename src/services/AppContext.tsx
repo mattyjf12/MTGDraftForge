@@ -148,6 +148,7 @@ type Action =
   | { type: 'JOIN_ROOM'; roomId: string; player: Player; remoteRoom?: DraftRoom }
   | { type: 'SET_ACTIVE_ROOM'; roomId: string | null }
   | { type: 'DELETE_ROOM'; roomId: string }
+  | { type: 'DELETE_ALL_ROOMS' }
   | { type: 'UPDATE_ROOM'; room: DraftRoom }
   | { type: 'START_TOURNAMENT'; roomId: string }
   | { type: 'LOG_ELIM_RESULT'; roomId: string; matchId: string; winnerId: string; loserId: string; winnerLife: number; loserLife: number }
@@ -203,6 +204,9 @@ function appReducer(state: AppState, action: Action): AppState {
       const activeRoomId = state.activeRoomId === action.roomId ? null : state.activeRoomId;
       return { ...state, rooms, activeRoomId };
     }
+
+    case 'DELETE_ALL_ROOMS':
+      return { ...state, rooms: [], activeRoomId: null };
 
     case 'UPDATE_ROOM': {
       const previousRoom = state.rooms.find(r => r.id === action.room.id);
@@ -633,6 +637,7 @@ interface AppContextValue {
   setAvatarUrl: (url: string) => void;
   addBot: (roomId: string) => void;
   removeBot: (roomId: string, botId: string) => void;
+  renameBot: (roomId: string, botId: string, name: string) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -849,8 +854,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state.rooms]);
 
+  const renameBot = useCallback((roomId: string, botId: string, name: string) => {
+    const room = state.rooms.find(r => r.id === roomId);
+    if (!room) return;
+    const updatedPlayers = room.players.map(p => p.id === botId ? { ...p, name } : p);
+    dispatch({ type: 'UPDATE_ROOM', room: { ...room, players: updatedPlayers } });
+    syncRoomToFirestore({ ...room, players: updatedPlayers });
+  }, [state.rooms]);
+
   return (
-    <AppContext.Provider value={{ state, dispatch, activeRoom, createRoom, joinRoomByCode, setUserName, setProfileEmoji, setAvatarUrl, addBot, removeBot }}>
+    <AppContext.Provider value={{ state, dispatch, activeRoom, createRoom, joinRoomByCode, setUserName, setProfileEmoji, setAvatarUrl, addBot, removeBot, renameBot }}>
       {children}
     </AppContext.Provider>
   );

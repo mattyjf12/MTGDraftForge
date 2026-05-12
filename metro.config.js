@@ -1,4 +1,5 @@
 const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
+const path = require('path');
 
 /**
  * Metro configuration
@@ -21,6 +22,13 @@ const config = {
     unstable_enablePackageExports: true,
     unstable_conditionNames: ['react-native', 'require', 'default'],
     resolverMainFields: ['browser', 'main'],
+    blockList: [
+      // Xcode's script sandbox blocks Metro from scanning these paths
+      /.*\.xcodeproj\/.*/,
+      /.*\.xcworkspace\/.*/,
+      /ios\/Pods\/.*/,
+      /ios\/build\/.*/,
+    ],
   },
 };
 
