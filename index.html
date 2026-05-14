@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MTG Draft Forge — Support</title>
+  <meta name="description" content="Support, FAQ, and privacy policy for MTG Draft Forge — the Magic: The Gathering tournament and draft manager for iOS." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    /* ── Design tokens ── */
+    :root {
+      --gold:        #c9a84c;
+      --gold-light:  #f0d47a;
+      --gold-dim:    #8a6a20;
+      --gold-glow:   rgba(201,168,76,0.12);
+      --gold-glow2:  rgba(201,168,76,0.06);
+      --bg:          #07070e;
+      --bg-card:     #0e0d18;
+      --bg-surface:  #141220;
+      --border:      #1e1c2e;
+      --border-gold: #3a3018;
+      --text:        #e8e2d5;
+      --text-muted:  #7a7390;
+      --text-faint:  #3a3650;
+      --red:         #c0392b;
+      --green:       #27ae60;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Crimson Pro', Georgia, serif;
+      font-size: 18px;
+      line-height: 1.7;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Starfield background ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        radial-gradient(1px 1px at 15% 20%, rgba(201,168,76,0.4) 0%, transparent 100%),
+        radial-gradient(1px 1px at 72% 8%,  rgba(201,168,76,0.3) 0%, transparent 100%),
+        radial-gradient(1px 1px at 40% 45%, rgba(201,168,76,0.2) 0%, transparent 100%),
+        radial-gradient(1px 1px at 88% 60%, rgba(201,168,76,0.3) 0%, transparent 100%),
+        radial-gradient(1px 1px at 5%  75%, rgba(201,168,76,0.2) 0%, transparent 100%),
+        radial-gradient(1px 1px at 55% 90%, rgba(201,168,76,0.3) 0%, transparent 100%),
+        radial-gradient(1px 1px at 30% 65%, rgba(201,168,76,0.15) 0%, transparent 100%),
+        radial-gradient(1px 1px at 95% 30%, rgba(201,168,76,0.25) 0%, transparent 100%),
+        radial-gradient(2px 2px at 60% 15%, rgba(255,255,255,0.08) 0%, transparent 100%),
+        radial-gradient(2px 2px at 20% 88%, rgba(255,255,255,0.06) 0%, transparent 100%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Atmospheric glow ── */
+    body::after {
+      content: '';
+      position: fixed;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 500px;
+      background: radial-gradient(ellipse at center, rgba(201,168,76,0.06) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Layout wrapper ── */
+    .page {
+      position: relative;
+      z-index: 1;
+      max-width: 780px;
+      margin: 0 auto;
+      padding: 0 24px 80px;
+    }
+
+    /* ── Header ── */
+    header {
+      text-align: center;
+      padding: 72px 0 56px;
+      position: relative;
+    }
+
+    .crest {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 80px;
+      height: 80px;
+      margin-bottom: 20px;
+      position: relative;
+    }
+
+    .crest svg {
+      width: 80px;
+      height: 80px;
+      filter: drop-shadow(0 0 16px rgba(201,168,76,0.4));
+      animation: crest-pulse 4s ease-in-out infinite;
+    }
+
+    @keyframes crest-pulse {
+      0%, 100% { filter: drop-shadow(0 0 12px rgba(201,168,76,0.3)); }
+      50%       { filter: drop-shadow(0 0 28px rgba(201,168,76,0.6)); }
+    }
+
+    .site-title {
+      font-family: 'Cinzel', serif;
+      font-size: clamp(28px, 6vw, 42px);
+      font-weight: 700;
+      color: var(--gold);
+      letter-spacing: 0.05em;
+      line-height: 1.1;
+      margin-bottom: 8px;
+    }
+
+    .site-sub {
+      font-family: 'Cinzel', serif;
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+
+    .header-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+
+    .header-divider::before,
+    .header-divider::after {
+      content: '';
+      width: 60px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold-dim));
+    }
+    .header-divider::after {
+      background: linear-gradient(90deg, var(--gold-dim), transparent);
+    }
+
+    .header-divider span {
+      color: var(--gold);
+      font-size: 14px;
+    }
+
+    .header-desc {
+      color: var(--text-muted);
+      font-size: 16px;
+      max-width: 480px;
+      margin: 0 auto;
+      font-style: italic;
+    }
+
+    /* ── App Store badge ── */
+    .app-store-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 28px;
+      padding: 12px 24px;
+      background: var(--gold-glow);
+      border: 1px solid var(--border-gold);
+      border-radius: 8px;
+      color: var(--gold);
+      text-decoration: none;
+      font-family: 'Cinzel', serif;
+      font-size: 12px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .app-store-btn:hover {
+      background: rgba(201,168,76,0.18);
+      border-color: var(--gold-dim);
+    }
+
+    /* ── Nav pills ── */
+    nav {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 56px;
+    }
+
+    nav a {
+      padding: 7px 18px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-family: 'Cinzel', serif;
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      transition: all 0.2s;
+    }
+
+    nav a:hover {
+      border-color: var(--gold-dim);
+      color: var(--gold);
+      background: var(--gold-glow);
+    }
+
+    /* ── Section ── */
+    section {
+      margin-bottom: 56px;
+      opacity: 0;
+      transform: translateY(20px);
+      animation: fade-up 0.6s ease forwards;
+    }
+
+    section:nth-child(1) { animation-delay: 0.1s; }
+    section:nth-child(2) { animation-delay: 0.2s; }
+    section:nth-child(3) { animation-delay: 0.3s; }
+    section:nth-child(4) { animation-delay: 0.4s; }
+    section:nth-child(5) { animation-delay: 0.5s; }
+
+    @keyframes fade-up {
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .section-icon {
+      font-size: 22px;
+      flex-shrink: 0;
+    }
+
+    .section-title {
+      font-family: 'Cinzel', serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--gold);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+
+    .section-rule {
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, var(--border-gold), transparent);
+    }
+
+    /* ── Features grid ── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .feature-card:hover {
+      border-color: var(--border-gold);
+      background: var(--bg-surface);
+    }
+
+    .feature-icon { font-size: 20px; margin-bottom: 8px; }
+    .feature-name {
+      font-family: 'Cinzel', serif;
+      font-size: 12px;
+      color: var(--gold);
+      letter-spacing: 0.1em;
+      margin-bottom: 4px;
+    }
+    .feature-desc { font-size: 15px; color: var(--text-muted); line-height: 1.5; }
+
+    /* ── FAQ ── */
+    .faq-list { display: flex; flex-direction: column; gap: 2px; }
+
+    details {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+
+    details[open] { border-color: var(--border-gold); }
+
+    summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      cursor: pointer;
+      list-style: none;
+      font-size: 17px;
+      color: var(--text);
+      user-select: none;
+      gap: 12px;
+    }
+
+    summary::-webkit-details-marker { display: none; }
+
+    summary::after {
+      content: '+';
+      font-family: 'Cinzel', serif;
+      font-size: 18px;
+      color: var(--gold-dim);
+      flex-shrink: 0;
+      transition: transform 0.2s, color 0.2s;
+    }
+
+    details[open] summary::after {
+      transform: rotate(45deg);
+      color: var(--gold);
+    }
+
+    .faq-body {
+      padding: 0 20px 18px;
+      color: var(--text-muted);
+      font-size: 16px;
+      line-height: 1.7;
+      border-top: 1px solid var(--border);
+    }
+
+    .faq-body p + p { margin-top: 10px; }
+
+    .faq-body a {
+      color: var(--gold);
+      text-decoration: underline;
+      text-decoration-color: var(--gold-dim);
+    }
+
+    .faq-body code {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 14px;
+      color: var(--gold-light);
+      font-family: 'Courier New', monospace;
+    }
+
+    /* ── Format table ── */
+    .format-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 15px;
+    }
+
+    .format-table th {
+      font-family: 'Cinzel', serif;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: var(--text-muted);
+      text-align: left;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .format-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-muted);
+      vertical-align: top;
+    }
+
+    .format-table tr:last-child td { border-bottom: none; }
+
+    .format-table tr:hover td { background: var(--bg-surface); }
+
+    .format-name-cell {
+      font-family: 'Cinzel', serif;
+      font-size: 12px;
+      color: var(--gold) !important;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+
+    /* ── Contact card ── */
+    .contact-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }
+
+    .contact-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 22px 24px;
+      text-decoration: none;
+      display: block;
+      transition: border-color 0.2s, background 0.2s, transform 0.15s;
+    }
+
+    .contact-card:hover {
+      border-color: var(--gold-dim);
+      background: var(--bg-surface);
+      transform: translateY(-2px);
+    }
+
+    .contact-card-icon { font-size: 24px; margin-bottom: 10px; }
+    .contact-card-title {
+      font-family: 'Cinzel', serif;
+      font-size: 12px;
+      color: var(--gold);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .contact-card-detail { font-size: 15px; color: var(--text-muted); }
+    .contact-card-hint { font-size: 13px; color: var(--text-faint); margin-top: 4px; font-style: italic; }
+
+    /* ── Privacy policy ── */
+    .policy-block {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px 32px;
+    }
+
+    .policy-block h3 {
+      font-family: 'Cinzel', serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--gold);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin: 20px 0 8px;
+    }
+
+    .policy-block h3:first-child { margin-top: 0; }
+
+    .policy-block p {
+      font-size: 15px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      line-height: 1.7;
+    }
+
+    .policy-block ul {
+      margin: 6px 0 8px 20px;
+      font-size: 15px;
+      color: var(--text-muted);
+    }
+
+    .policy-block li { margin-bottom: 4px; }
+
+    .policy-date {
+      font-size: 13px;
+      color: var(--text-faint);
+      font-style: italic;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── Footer ── */
+    footer {
+      text-align: center;
+      padding: 40px 0 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .footer-logo {
+      font-family: 'Cinzel', serif;
+      font-size: 14px;
+      color: var(--gold-dim);
+      letter-spacing: 0.2em;
+      margin-bottom: 8px;
+    }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin: 14px 0;
+    }
+
+    .footer-links a {
+      font-size: 13px;
+      color: var(--text-faint);
+      text-decoration: none;
+      font-family: 'Cinzel', serif;
+      letter-spacing: 0.1em;
+      font-size: 10px;
+      text-transform: uppercase;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover { color: var(--gold); }
+
+    .footer-copy {
+      font-size: 13px;
+      color: var(--text-faint);
+      margin-top: 8px;
+    }
+
+    /* ── Utility ── */
+    .ornament { color: var(--gold-dim); font-size: 12px; }
+
+    @media (max-width: 500px) {
+      .page { padding: 0 16px 60px; }
+      header { padding: 48px 0 40px; }
+      .policy-block { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ── Header ── -->
+  <header>
+    <div class="crest">
+      <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="40,4 48,28 74,28 53,44 61,68 40,52 19,68 27,44 6,28 32,28"
+          fill="none" stroke="#c9a84c" stroke-width="1.5" stroke-linejoin="round"/>
+        <polygon points="40,14 45,28 60,28 49,36 53,50 40,42 27,50 31,36 20,28 35,28"
+          fill="rgba(201,168,76,0.08)" stroke="#8a6a20" stroke-width="1" stroke-linejoin="round"/>
+        <circle cx="40" cy="40" r="6" fill="rgba(201,168,76,0.25)" stroke="#c9a84c" stroke-width="1"/>
+      </svg>
+    </div>
+    <h1 class="site-title">MTG Draft Forge</h1>
+    <p class="site-sub">Tournament &amp; Draft Manager for iOS</p>
+    <div class="header-divider">
+      <span>✦</span>
+    </div>
+    <p class="header-desc">
+      Organize Magic: The Gathering drafts and tournaments from your pocket.
+      Brackets, life counters, dice — everything your playgroup needs.
+    </p>
+    <a href="https://apps.apple.com" class="app-store-btn">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+      Download on the App Store
+    </a>
+  </header>
+
+  <!-- ── Nav ── -->
+  <nav>
+    <a href="#features">Features</a>
+    <a href="#faq">FAQ</a>
+    <a href="#formats">Formats</a>
+    <a href="#contact">Contact</a>
+    <a href="#privacy">Privacy Policy</a>
+  </nav>
+
+  <!-- ── Features ── -->
+  <section id="features">
+    <div class="section-header">
+      <span class="section-icon">⚔️</span>
+      <span class="section-title">Features</span>
+      <div class="section-rule"></div>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🏰</div>
+        <div class="feature-name">Draft Rooms</div>
+        <div class="feature-desc">Create a room and invite your playgroup with a 6-character code. No account needed.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🏆</div>
+        <div class="feature-name">6 Tournament Formats</div>
+        <div class="feature-desc">Single Elim, Double Elim, Round Robin, Seeded, MTGA Style, and Auto-Suggested.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <div class="feature-name">Live Brackets &amp; Standings</div>
+        <div class="feature-desc">Log results in real time. Standings update instantly with tiebreakers by life total.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🪑</div>
+        <div class="feature-name">Seating Chart</div>
+        <div class="feature-desc">Randomize draft pod positions with a visual circular seating diagram.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">❤️</div>
+        <div class="feature-name">Life Counter</div>
+        <div class="feature-desc">Track life for up to 6 players with poison, energy, and low-life alerts.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🎲</div>
+        <div class="feature-name">Dice Roller</div>
+        <div class="feature-desc">Full set — d4 through d100. Roll multiple dice, see history, get Natural 20 alerts.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FAQ ── -->
+  <section id="faq">
+    <div class="section-header">
+      <span class="section-icon">📜</span>
+      <span class="section-title">Frequently Asked Questions</span>
+      <div class="section-rule"></div>
+    </div>
+    <div class="faq-list">
+
+      <details>
+        <summary>How do I invite friends to my draft room?</summary>
+        <div class="faq-body">
+          <p>When you create a room, a 6-character <strong>invite code</strong> is generated automatically — for example, <code>DRAFT7</code>. Share that code with your playgroup verbally, via text, or take a screenshot.</p>
+          <p>Your friends open the app, tap <strong>Join Room</strong>, enter the code, and they'll appear in your player list instantly.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Can players on different phones join the same room?</summary>
+        <div class="faq-body">
+          <p>Yes — that's the primary use case. Everyone at your table runs the app on their own device and joins via the invite code. The room creator manages starting the tournament and logging results.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>What's the difference between the tournament formats?</summary>
+        <div class="faq-body">
+          <p>See the <a href="#formats">Formats</a> section below for a full breakdown. The quick version: <strong>Single Elimination</strong> is fastest, <strong>Round Robin</strong> is fairest for small groups, and <strong>MTGA Style</strong> mirrors the Arena draft experience (first to 7 wins).</p>
+          <p>If you're unsure, pick <strong>Suggested</strong> — the app automatically chooses the best format for your player count.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>How does the MTGA Style format work?</summary>
+        <div class="faq-body">
+          <p>Each player tracks their own match record independently. The first player to reach <strong>7 wins</strong> is the tournament champion. Reaching <strong>3 losses</strong> eliminates a player.</p>
+          <p>Players don't necessarily play each other directly — this format tracks individual performance across the event, matching the Arena Limited experience.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>How are tiebreakers handled in standings?</summary>
+        <div class="faq-body">
+          <p>Standings are sorted by <strong>Match Points</strong> (3 per win) first. If players are tied on points, the tiebreaker is their accumulated <strong>final life total</strong> from all matches — so winning with more life remaining gives a standings advantage.</p>
+          <p>This encourages playing aggressively even in lopsided games.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Do I need an account or internet connection?</summary>
+        <div class="faq-body">
+          <p>No account is ever required. The app works fully offline — all room data is stored on your device.</p>
+          <p>Multi-device room syncing (players on different phones seeing the same live bracket) requires all players to be on the same local network or have internet access.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>How do I randomize the draft seating?</summary>
+        <div class="faq-body">
+          <p>Inside your active room, tap <strong>Seating</strong> from the tournament hub, then tap <strong>Randomize Seats</strong>. The app generates a circular seating diagram showing numbered positions around the table, with pack-passing direction indicated.</p>
+          <p>Tap the button again to re-randomize at any time before the draft starts.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Can I use the life counter without creating a tournament?</summary>
+        <div class="faq-body">
+          <p>Yes — the <strong>Life Counter</strong> tab is fully standalone. Open it directly from the bottom navigation. You can track life for 1–6 players, choose your starting life total (20, 30, 40, or 50), and add or remove players at any time.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>What dice are available in the dice roller?</summary>
+        <div class="faq-body">
+          <p>The roller includes: <code>d4</code>, <code>d6</code>, <code>d8</code>, <code>d10</code>, <code>d12</code>, <code>d20</code>, and <code>d100</code>. You can roll up to 10 dice at once and see individual results alongside the total.</p>
+          <p>Rolling a <strong>Natural 20</strong> or a <strong>Critical 1</strong> on a d20 triggers a special alert — feel the moment.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>I found a bug or have a feature request — where do I report it?</summary>
+        <div class="faq-body">
+          <p>You can report bugs and suggest features on our <a href="https://github.com/mattyjf12/MTGDraftForge/issues" target="_blank" rel="noopener">GitHub Issues page</a>. Please include your iOS version, a description of what happened, and steps to reproduce if possible.</p>
+          <p>Alternatively, email us at <a href="mailto:mtgdraftforge@gmail.com">mtgdraftforge@gmail.com</a> and we'll follow up directly.</p>
+        </div>
+      </details>
+
+    </div>
+  </section>
+
+  <!-- ── Formats ── -->
+  <section id="formats">
+    <div class="section-header">
+      <span class="section-icon">🗂️</span>
+      <span class="section-title">Tournament Formats</span>
+      <div class="section-rule"></div>
+    </div>
+    <div class="policy-block" style="padding: 0; overflow: hidden;">
+      <table class="format-table">
+        <thead>
+          <tr>
+            <th>Format</th>
+            <th>Best For</th>
+            <th>How It Works</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="format-name-cell">⚔️ Single Elim</td>
+            <td>Any size, fast events</td>
+            <td>One loss and you're out. Bracket advances winners each round.</td>
+          </tr>
+          <tr>
+            <td class="format-name-cell">🛡️ Double Elim</td>
+            <td>4–16 players</td>
+            <td>Winners and losers brackets. Two losses required for elimination.</td>
+          </tr>
+          <tr>
+            <td class="format-name-cell">🔄 Round Robin</td>
+            <td>3–12 players</td>
+            <td>Everyone plays everyone. Most match points wins overall.</td>
+          </tr>
+          <tr>
+            <td class="format-name-cell">🌱 Seeded Elim</td>
+            <td>Ranked groups</td>
+            <td>Single elimination with seeded bracket draw — top seeds are protected.</td>
+          </tr>
+          <tr>
+            <td class="format-name-cell">🃏 MTGA Style</td>
+            <td>2–8 players</td>
+            <td>First to 7 wins is the champion. 3 losses = eliminated.</td>
+          </tr>
+          <tr>
+            <td class="format-name-cell">✨ Suggested</td>
+            <td>Any size</td>
+            <td>The app automatically picks the best format for your player count.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Contact ── -->
+  <section id="contact">
+    <div class="section-header">
+      <span class="section-icon">✉️</span>
+      <span class="section-title">Get Support</span>
+      <div class="section-rule"></div>
+    </div>
+    <div class="contact-grid">
+      <a class="contact-card" href="mailto:mtgdraftforge@gmail.com">
+        <div class="contact-card-icon">📧</div>
+        <div class="contact-card-title">Email Support</div>
+        <div class="contact-card-detail">mtgdraftforge@gmail.com</div>
+        <div class="contact-card-hint">General questions &amp; feedback</div>
+      </a>
+      <a class="contact-card" href="https://github.com/mattyjf12/MTGDraftForge/issues" target="_blank" rel="noopener">
+        <div class="contact-card-icon">🐛</div>
+        <div class="contact-card-title">Report a Bug</div>
+        <div class="contact-card-detail">GitHub Issues</div>
+        <div class="contact-card-hint">Bug reports &amp; feature requests</div>
+      </a>
+      <a class="contact-card" href="https://github.com/mattyjf12/MTGDraftForge" target="_blank" rel="noopener">
+        <div class="contact-card-icon">💻</div>
+        <div class="contact-card-title">Source Code</div>
+        <div class="contact-card-detail">github.com/mattyjf12</div>
+        <div class="contact-card-hint">View the repository</div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ── Privacy Policy ── -->
+  <section id="privacy">
+    <div class="section-header">
+      <span class="section-icon">🔒</span>
+      <span class="section-title">Privacy Policy</span>
+      <div class="section-rule"></div>
+    </div>
+    <div class="policy-block">
+
+      <h3>Overview</h3>
+      <p>MTG Draft Forge ("the app") is designed with privacy as a default. We do not collect, sell, or share your personal data with third parties.</p>
+
+      <h3>Data We Collect</h3>
+      <p>The app does not require an account and does not collect any personally identifiable information. All data you enter — room names, player names, match results, life totals — is stored locally on your device only.</p>
+
+      <h3>Data Storage</h3>
+      <p>All tournament and room data is stored on-device using iOS local storage (AsyncStorage). This data never leaves your device unless you explicitly share it. Uninstalling the app permanently removes all stored data.</p>
+
+      <h3>Analytics &amp; Tracking</h3>
+      <p>MTG Draft Forge does not use any analytics services, advertising SDKs, or tracking technologies. We do not track how you use the app.</p>
+
+      <h3>Third-Party Services</h3>
+      <p>The app does not integrate with any third-party advertising or analytics platforms. If you contact us via email, your email address is used solely to respond to your inquiry.</p>
+
+      <h3>Children's Privacy</h3>
+      <p>MTG Draft Forge does not knowingly collect information from children under 13. The app contains no account creation, social features, or data collection of any kind.</p>
+
+      <h3>Changes to This Policy</h3>
+      <p>Any material changes to this privacy policy will be reflected on this page with an updated date. Continued use of the app after changes constitutes acceptance of the revised policy.</p>
+
+      <h3>Contact</h3>
+      <p>Questions about this privacy policy? Email us at <a href="mailto:mtgdraftforge@gmail.com" style="color: var(--gold);">mtgdraftforge@gmail.com</a>.</p>
+
+      <p class="policy-date">Last updated: May 2026</p>
+    </div>
+  </section>
+
+  <!-- ── Footer ── -->
+  <footer>
+    <div class="footer-logo">MTG Draft Forge</div>
+    <div class="footer-links">
+      <a href="#features">Features</a>
+      <a href="#faq">FAQ</a>
+      <a href="#formats">Formats</a>
+      <a href="#contact">Contact</a>
+      <a href="#privacy">Privacy Policy</a>
+      <a href="https://github.com/mattyjf12/MTGDraftForge/issues" target="_blank" rel="noopener">Report a Bug</a>
+    </div>
+    <p class="footer-copy">© 2026 MTG Draft Forge. Not affiliated with Wizards of the Coast.</p>
+  </footer>
+
+</div>
+</body>
+</html>
