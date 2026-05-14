@@ -48,6 +48,12 @@ __MACOSX/
 *.swp
 *.swo
 
+# Play Store certificates & keystores (root-level)
+*.der
+*.pem
+*.p12
+*.jks
+
 # Misc artefacts
 *.log
 *.tsbuildinfo
