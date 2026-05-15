@@ -57,10 +57,10 @@ const SLIDES = [
     icon: '🌐',
     title: 'Real-Time Sync',
     subtitle: 'CROSS-DEVICE',
-    body: 'Rooms sync instantly across iOS and Android via Firebase. The host\'s changes appear on every player\'s screen as they happen.',
+    body: 'Rooms sync instantly across all devices via Firebase. The host\'s changes appear on every player\'s screen as they happen.',
     accent: Colors.purpleLight,
     features: [
-      { icon: '📱', label: 'iOS & Android', desc: 'Works on any device' },
+      { icon: '📱', label: 'Any Device', desc: 'Works on any device' },
       { icon: '⚡', label: 'Instant Sync',  desc: 'No refresh needed' },
       { icon: '🔒', label: 'Secure',        desc: 'Anonymous auth, no account required' },
     ],
