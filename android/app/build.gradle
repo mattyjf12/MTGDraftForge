@@ -91,8 +91,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Bump versionCode by 1 for every Play Store upload.
         // Bump versionName for user-visible releases (e.g. "1.1", "2.0").
-        versionCode 3
-        versionName "1.1"
+        versionCode 1
+        versionName "1.0"
     }
     signingConfigs {
         debug {
