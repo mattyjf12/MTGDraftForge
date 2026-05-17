@@ -1,8 +1,8 @@
 // ScheduleScreen.tsx
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRoute, RouteProp } from '@react-navigation/native';
+import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius, getSuggestedFormat } from '../theme';
 import { Card, EmptyState, Badge, Divider } from '../components/UI';
 import { useApp } from '../services/AppContext';
@@ -14,20 +14,31 @@ type Route = RouteProp<RoomsStackParams, 'Schedule'>;
 
 export default function ScheduleScreen() {
   const route = useRoute<Route>();
-  const { state } = useApp();
+  const navigation = useNavigation<any>();
+  const { state, dispatch } = useApp();
   const room = state.rooms.find(r => r.id === route.params.roomId);
 
   if (!room) return <SafeAreaView style={s.safe}><EmptyState icon="❓" title="Room not found" /></SafeAreaView>;
 
   const effectiveFmt = room.format === 'suggested' ? getSuggestedFormat(room.players.length) : room.format;
+  const myName = state.currentUserName;
+  const startingLife = room.settings?.startingLife ?? 20;
 
   function getPlayerName(id: string | null): string {
     if (!id) return 'TBD';
     return room.players.find(p => p.id === id)?.name || 'Unknown';
   }
 
+  function handlePlay(p1: string, p2: string) {
+    dispatch({
+      type: 'SET_PENDING_MATCHUP_CONFIG',
+      config: { playerNames: [p1, p2], startingLife },
+    });
+    navigation.getParent()?.navigate('LifeCounter');
+  }
+
   // Build schedule data
-  let scheduleRounds: Array<{ label: string; matches: Array<{ p1: string; p2: string; status: string; winner?: string }> }> = [];
+  let scheduleRounds: Array<{ label: string; matches: Array<{ p1: string; p2: string; status: string; winner?: string; myMatch?: boolean }> }> = [];
 
   if (effectiveFmt === 'round_robin') {
     const pairings = generateRoundRobinSchedule(room.players);
@@ -39,11 +50,13 @@ export default function ScheduleScreen() {
       matches: round.map(([p1id, p2id]) => {
         const key = getRRKeyLocal(p1id, p2id);
         const res = results[key];
+        const p1 = getPlayerName(p1id);
+        const p2 = getPlayerName(p2id);
         return {
-          p1: getPlayerName(p1id),
-          p2: getPlayerName(p2id),
+          p1, p2,
           status: res ? 'complete' : 'pending',
           winner: res ? getPlayerName(res.winnerId) : undefined,
+          myMatch: !res && (p1 === myName || p2 === myName),
         };
       }),
     }));
@@ -66,11 +79,13 @@ export default function ScheduleScreen() {
         label,
         matches: round.map(({ p1id, p2id, gameKey }) => {
           const res = results[gameKey];
+          const p1 = getPlayerName(p1id);
+          const p2 = getPlayerName(p2id);
           return {
-            p1: getPlayerName(p1id),
-            p2: getPlayerName(p2id),
+            p1, p2,
             status: res ? 'complete' : 'pending',
             winner: res ? getPlayerName(res.winnerId) : undefined,
+            myMatch: !res && (p1 === myName || p2 === myName),
           };
         }),
       };
@@ -111,12 +126,17 @@ export default function ScheduleScreen() {
         label,
         matches: rounds[rn]
           .filter((m: BracketMatch) => !m.isBye && (m.player1Id || m.player2Id))
-          .map((m: BracketMatch) => ({
-            p1: getPlayerName(m.player1Id),
-            p2: getPlayerName(m.player2Id),
-            status: m.result?.winnerId ? 'complete' : 'pending',
-            winner: m.result?.winnerId ? getPlayerName(m.result.winnerId) : undefined,
-          })),
+          .map((m: BracketMatch) => {
+            const p1 = getPlayerName(m.player1Id);
+            const p2 = getPlayerName(m.player2Id);
+            const done = !!m.result?.winnerId;
+            return {
+              p1, p2,
+              status: done ? 'complete' : 'pending',
+              winner: done ? getPlayerName(m.result!.winnerId) : undefined,
+              myMatch: !done && m.player1Id && m.player2Id && (p1 === myName || p2 === myName),
+            };
+          }),
       };
     }).filter(r => r.matches.length > 0);
   }
@@ -155,6 +175,14 @@ export default function ScheduleScreen() {
                         {match.winner && (
                           <Text style={s.winnerText}>🏆 {match.winner}</Text>
                         )}
+                        {match.myMatch && match.p2 && (
+                          <TouchableOpacity
+                            style={s.playBtn}
+                            onPress={() => handlePlay(match.p1, match.p2!)}
+                          >
+                            <Text style={s.playBtnText}>▶ Play</Text>
+                          </TouchableOpacity>
+                        )}
                       </View>
                     </View>
                     {mi < round.matches.length - 1 && <Divider style={{ marginVertical: 8 }} />}
@@ -187,4 +215,18 @@ const s = StyleSheet.create({
   playerText: { ...Typography.bodyMD },
   vsText: { ...Typography.bodySM, color: Colors.textFaint, marginVertical: 2, marginLeft: 4 },
   winnerText: { ...Typography.bodySM, color: Colors.gold },
+  playBtn: {
+    backgroundColor: Colors.goldGlow,
+    borderWidth: 1,
+    borderColor: Colors.gold,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    marginTop: 2,
+  },
+  playBtnText: {
+    ...Typography.labelSM,
+    color: Colors.gold,
+    letterSpacing: 0.8,
+  },
 });

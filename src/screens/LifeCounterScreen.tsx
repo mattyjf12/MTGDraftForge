@@ -824,6 +824,28 @@ export default function LifeCounterScreen() {
     );
   }, [players, state.activeRoomId, state.rooms, state.currentUserId, state.currentUserName, dispatch]);
 
+  // ── Apply matchup config pushed from Schedule screen ─────────────────────
+  useEffect(() => {
+    const cfg = state.pendingMatchupConfig;
+    if (!cfg) return;
+    const newPlayers: LifePlayer[] = cfg.playerNames.map((name, idx) => ({
+      id: uuidv4(),
+      name,
+      life: cfg.startingLife,
+      startingLife: cfg.startingLife,
+      color: PLAYER_COLORS[idx % PLAYER_COLORS.length],
+      poisonCounters: 0,
+      energyCounters: 0,
+      isEliminated: false,
+    }));
+    setCommanderMode(false);
+    setStartLife(cfg.startingLife);
+    setPlayers(newPlayers);
+    logPromptFiredRef.current = false;
+    dispatch({ type: 'CLEAR_PENDING_MATCHUP_CONFIG' });
+    haptic('notificationSuccess');
+  }, [state.pendingMatchupConfig]);
+
   // ── Commander mode toggle: reset life totals ──────────────────────────────
   function toggleCommanderMode(enabled: boolean) {
     setCommanderMode(enabled);

@@ -57,3 +57,4 @@ __MACOSX/
 # Misc artefacts
 *.log
 *.tsbuildinfo
+ios/.xcode.env.local

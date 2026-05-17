@@ -1074,10 +1074,11 @@ PODS:
     - RCT-Folly (= 2022.05.16.00)
     - React-Core
     - ReactCommon/turbomodule/core
-  - RNScreens (3.29.0):
+  - RNScreens (3.34.1):
     - glog
     - RCT-Folly (= 2022.05.16.00)
     - React-Core
+    - React-RCTImage
   - RNSentry (8.11.0):
     - glog
     - hermes-engine
@@ -1339,13 +1340,13 @@ SPEC CHECKSUMS:
   RNGestureHandler: 2a76de24abfbdfdc7a7a5fcb4b5e57563ada065e
   RNReactNativeHapticFeedback: eb22cad25cda04d61b130f4d5da62a61f581a4d6
   RNReanimated: dec55644357451e94ab91e0bf16b350b869c9cd9
-  RNScreens: 8d1521c6e375a79dbd4525efaf21704cc64ac0cf
+  RNScreens: 5b2ca36afcc17b6307d098ba88a51e4d2b0663ca
   RNSentry: 4ff459af5a88b4957bcdff6c6ddf2b0c533982d5
   RNSVG: 36ab724902de0406127ef8d63d940c055e2a1442
   Sentry: 49ca124994347ba8f89a70f99784bbeedabfa35e
   SocketRocket: f32cd54efbe0f095c4d7594881e52619cfe80b17
   Yoga: 1b901a6d6eeba4e8a2e8f308f708691cdb5db312
 
-PODFILE CHECKSUM: 7efb2ea31e399ea3dfad3910350ede0adbe00899
+PODFILE CHECKSUM: bc1a47605e83c5843ad327a648f984c51bd51ef9
 
 COCOAPODS: 1.16.2

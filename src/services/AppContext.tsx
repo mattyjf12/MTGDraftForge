@@ -128,6 +128,11 @@ function buildHistoryEntry(room: DraftRoom): TournamentHistoryEntry {
 }
 
 // ── State shape ───────────────────────────────
+export interface PendingMatchupConfig {
+  playerNames: [string, string];
+  startingLife: number;
+}
+
 interface AppState {
   rooms: DraftRoom[];
   activeRoomId: string | null;
@@ -138,6 +143,7 @@ interface AppState {
   profileEmoji: string;
   avatarUrl: string;
   tournamentHistory: TournamentHistoryEntry[];
+  pendingMatchupConfig: PendingMatchupConfig | null;
 }
 
 // ── Actions ───────────────────────────────────
@@ -168,7 +174,9 @@ type Action =
   | { type: 'COMPLETE_TOURNAMENT'; roomId: string }
   | { type: 'REOPEN_TOURNAMENT'; roomId: string }
   | { type: 'ADD_BOT'; roomId: string; bot: Player }
-  | { type: 'REMOVE_BOT'; roomId: string; botId: string };
+  | { type: 'REMOVE_BOT'; roomId: string; botId: string }
+  | { type: 'SET_PENDING_MATCHUP_CONFIG'; config: PendingMatchupConfig }
+  | { type: 'CLEAR_PENDING_MATCHUP_CONFIG' };
 
 // ── Reducer ───────────────────────────────────
 function appReducer(state: AppState, action: Action): AppState {
@@ -605,6 +613,12 @@ function appReducer(state: AppState, action: Action): AppState {
       return { ...state, rooms };
     }
 
+    case 'SET_PENDING_MATCHUP_CONFIG':
+      return { ...state, pendingMatchupConfig: action.config };
+
+    case 'CLEAR_PENDING_MATCHUP_CONFIG':
+      return { ...state, pendingMatchupConfig: null };
+
     default:
       return state;
   }
@@ -621,6 +635,7 @@ const initialState: AppState = {
   profileEmoji: '🧙',
   avatarUrl: '',
   tournamentHistory: [],
+  pendingMatchupConfig: null,
 };
 
 // ── Context ───────────────────────────────────

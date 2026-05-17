@@ -7,8 +7,7 @@ apply plugin: "com.facebook.react"
  * By default you don't need to apply any configuration, just uncomment the lines you need.
  */
 react {
-    // Use Node 20 from nvm (system node is too old)
-    nodeExecutableAndArgs = [System.getenv("HOME") + "/.nvm/versions/node/v20.20.2/bin/node"]
+    // Use node from PATH (works locally with nvm/brew and on CI)
 
     /* Folders */
     //   The root of your project, i.e. where "package.json" lives. Default is '..'

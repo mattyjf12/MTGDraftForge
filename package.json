@@ -8,7 +8,8 @@
     "ios": "react-native run-ios",
     "start": "react-native start",
     "test": "jest",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "postinstall": "node -e \"const fs=require('fs'),p='node_modules/react-native-reanimated/android/CMakeLists.txt',c=fs.readFileSync(p,'utf8');if(!c.includes('-Wno-vla-cxx-extension')){fs.writeFileSync(p,c.replace('-Wall -Werror\\\"','-Wall -Werror -Wno-vla-cxx-extension -Wno-deprecated-this-capture\\\"'));console.log('Patched reanimated CMakeLists.txt for NDK r27')}\""
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^1.22.3",
@@ -25,7 +26,7 @@
     "react-native-gesture-handler": "^2.15.0",
     "react-native-get-random-values": "^1.11.0",
     "react-native-haptic-feedback": "^2.2.0",
-    "react-native-reanimated": "3.7.2",
+    "react-native-reanimated": "^3.10.1",
     "react-native-safe-area-context": "^4.8.2",
     "react-native-screens": "^3.34.1",
     "react-native-svg": "^15.11.2",
