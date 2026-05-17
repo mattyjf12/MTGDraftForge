@@ -58,7 +58,7 @@ post_install do |installer|
       # Mark shell script phases that have no outputs as always-out-of-date
       # to suppress "will be run during every build" Xcode warnings
       target.build_phases.each do |phase|
-        if phase.respond_to?(:shell_script) && phase.output_paths.empty?
+        if phase.respond_to?(:shell_script) && phase.output_paths&.empty?
           phase.always_out_of_date = "1"
         end
       end
