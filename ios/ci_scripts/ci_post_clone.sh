@@ -8,8 +8,16 @@ echo "=== ci_post_clone.sh starting ==="
 
 # --- Node.js setup ---
 NODE_VERSION="20.19.1"
-NODE_DIR="/tmp/node-v${NODE_VERSION}-darwin-arm64"
-NODE_TAR="node-v${NODE_VERSION}-darwin-arm64.tar.gz"
+ARCH=$(uname -m)
+if [ "$ARCH" = "arm64" ]; then
+  NODE_PLATFORM="darwin-arm64"
+else
+  NODE_PLATFORM="darwin-x64"
+fi
+NODE_DIR="/tmp/node-v${NODE_VERSION}-${NODE_PLATFORM}"
+NODE_TAR="node-v${NODE_VERSION}-${NODE_PLATFORM}.tar.gz"
+
+echo "Architecture: $ARCH -> using $NODE_PLATFORM"
 
 # Check common paths first
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -17,7 +25,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 if command -v node >/dev/null 2>&1; then
   echo "Node found: $(node --version) at $(which node)"
 else
-  echo "Node not found, downloading v${NODE_VERSION}..."
+  echo "Node not found, downloading v${NODE_VERSION} for ${NODE_PLATFORM}..."
   curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TAR}" -o "/tmp/${NODE_TAR}"
   tar -xzf "/tmp/${NODE_TAR}" -C /tmp
   export PATH="${NODE_DIR}/bin:$PATH"
