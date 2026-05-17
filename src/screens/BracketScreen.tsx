@@ -12,6 +12,7 @@ import { useApp } from '../services/AppContext';
 import { BracketMatch, Player, RRResult } from '../utils/types';
 import { RoomsStackParams } from '../navigation/RootNavigator';
 import { getRRKey, generateRoundRobinSchedule, generateMultiGameRRSchedule, generateFixedGamesSchedule, MultiGameRRMatch } from '../utils/tournament';
+import { patchBracketMatch, patchMtgaMatchupResult } from '../services/firebase';
 
 type Route = RouteProp<RoomsStackParams, 'Bracket'>;
 
@@ -116,6 +117,7 @@ function EliminationBracket({ roomId }: { roomId: string }) {
       winnerId, loserId,
       winnerLife: 0, loserLife: 0,
     });
+    patchBracketMatch(roomId, selectedMatch!.id, winnerId, loserId, 0, 0);
     setSelectedMatch(null);
   }
 
@@ -406,6 +408,7 @@ function MTGABracket({ roomId }: { roomId: string }) {
       winnerId,
       loserId,
     });
+    patchMtgaMatchupResult(roomId, selectedMatchup.roundNumber, selectedMatchup.matchupId, winnerId, loserId);
     setSelectedMatchup(null);
     setWinnerId('');
   }

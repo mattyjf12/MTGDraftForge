@@ -14,6 +14,7 @@ import {
   deleteDoc,
   onSnapshot,
   serverTimestamp,
+  runTransaction,
   getDocs,
   query,
   where,
@@ -27,7 +28,8 @@ import {
   User,
 } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { DraftRoom } from '../utils/types';
+import { DraftRoom, CommanderPodResult } from '../utils/types';
+import { advanceWinner } from '../utils/tournament';
 
 const firebaseConfig = {
   apiKey:            "AIzaSyCo-IgsBOxJUaPe36uTb4Vpe4bt7utb8f0",
@@ -222,6 +224,108 @@ export function subscribeToRoom(
     },
     (err) => console.warn('[Firebase] subscribeToRoom error:', err),
   );
+}
+
+/**
+ * Atomically update a single bracket match result.
+ * Uses a transaction so concurrent writes from both match participants
+ * don't overwrite each other — the transaction reads the current bracket
+ * from Firestore before writing.
+ */
+export async function patchBracketMatch(
+  roomId: string,
+  matchId: string,
+  winnerId: string,
+  loserId: string,
+  winnerLife: number,
+  loserLife: number,
+): Promise<void> {
+  try {
+    await runTransaction(db, async (tx) => {
+      const ref = doc(db, ROOMS_COLLECTION, roomId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return;
+      const bracket = advanceWinner(
+        (snap.data() as DraftRoom).bracket ?? [],
+        matchId, winnerId, loserId, winnerLife, loserLife,
+      );
+      tx.update(ref, { bracket, _updatedAt: serverTimestamp() });
+    });
+  } catch (err) {
+    console.warn('[Firebase] patchBracketMatch error:', err);
+  }
+}
+
+/**
+ * Atomically record results for a single commander pod.
+ * Reads the current pod list from Firestore so concurrent pod completions
+ * in the same round don't clobber each other.
+ */
+export async function patchCommanderPodResult(
+  roomId: string,
+  podId: string,
+  results: CommanderPodResult[],
+): Promise<void> {
+  try {
+    await runTransaction(db, async (tx) => {
+      const ref = doc(db, ROOMS_COLLECTION, roomId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return;
+      const commanderPods = ((snap.data() as DraftRoom).commanderPods ?? []).map(pod =>
+        pod.id === podId ? { ...pod, results } : pod,
+      );
+      tx.update(ref, { commanderPods, _updatedAt: serverTimestamp() });
+    });
+  } catch (err) {
+    console.warn('[Firebase] patchCommanderPodResult error:', err);
+  }
+}
+
+/**
+ * Atomically record the result for a single MTGA matchup.
+ * Reads the current rounds and records from Firestore so two matchups
+ * completing simultaneously in the same round don't overwrite each other.
+ * Firestore retries the transaction on conflict, so both results land safely.
+ */
+export async function patchMtgaMatchupResult(
+  roomId: string,
+  roundNumber: number,
+  matchupId: string,
+  winnerId: string,
+  loserId: string,
+): Promise<void> {
+  try {
+    await runTransaction(db, async (tx) => {
+      const ref = doc(db, ROOMS_COLLECTION, roomId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return;
+      const room = snap.data() as DraftRoom;
+
+      const mtgaRounds = (room.mtgaRounds ?? []).map(round => {
+        if (round.roundNumber !== roundNumber) return round;
+        const matchups = round.matchups.map(m =>
+          m.id === matchupId
+            ? { ...m, winnerId, loserId, completedAt: Date.now() }
+            : m,
+        );
+        const isComplete = matchups.every(m => m.isBye || m.winnerId !== undefined);
+        return { ...round, matchups, isComplete };
+      });
+
+      const mtgaRecords = (room.mtgaRecords ?? []).map(rec => {
+        if (rec.playerId === winnerId) return { ...rec, wins: rec.wins + 1 };
+        if (rec.playerId === loserId) {
+          const losses = rec.losses + 1;
+          return { ...rec, losses, active: losses < 3 };
+        }
+        return rec;
+      });
+
+      tx.update(ref, { mtgaRounds, mtgaRecords, _updatedAt: serverTimestamp() });
+    });
+  } catch (err) {
+    console.warn('[Firebase] patchMtgaMatchupResult error:', err);
+  }
 }
 
 /**

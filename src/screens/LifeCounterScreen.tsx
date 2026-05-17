@@ -11,6 +11,7 @@ import { generateRoundRobinSchedule, generateMultiGameRRSchedule, getRRKey, Mult
 import { Button, Card, Row, Label, Divider, haptic } from '../components/UI';
 import { LifePlayer } from '../utils/types';
 import { useApp } from '../services/AppContext';
+import { patchBracketMatch, patchMtgaMatchupResult } from '../services/firebase';
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -745,6 +746,7 @@ export default function LifeCounterScreen() {
                   winnerLife: winner.life,
                   loserLife: 0,
                 });
+                patchBracketMatch(activeRoom.id, match.id, winnerId, loserId, winner.life, 0);
               }
             } else if (effectiveFmt === 'round_robin') {
               const result = findEligibleRRPairing(
@@ -812,6 +814,7 @@ export default function LifeCounterScreen() {
                     winnerId,
                     loserId,
                   });
+                  patchMtgaMatchupResult(activeRoom.id, currentRound.roundNumber, matchup.id, winnerId, loserId);
                 }
               }
             }

@@ -12,6 +12,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Colors, Typography, Spacing, Radius } from '../theme';
 import { Button, Card, Row, Divider, Badge } from '../components/UI';
 import { useApp } from '../services/AppContext';
+import { patchCommanderPodResult } from '../services/firebase';
 import { CommanderPod, CommanderPodResult } from '../utils/types';
 import { RoomsStackParams } from '../navigation/RootNavigator';
 import { haptic } from '../components/UI';
@@ -186,6 +187,7 @@ export default function CommanderPodsScreen() {
 
   function handleLogResult(podId: string, results: CommanderPodResult[]) {
     dispatch({ type: 'LOG_COMMANDER_POD_RESULT', roomId, podId, results });
+    patchCommanderPodResult(roomId, podId, results);
     haptic('notificationSuccess');
   }
 
