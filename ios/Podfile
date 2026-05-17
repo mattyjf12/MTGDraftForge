@@ -46,5 +46,22 @@ post_install do |installer|
       config[:reactNativePath],
       :mac_catalyst_enabled => false
     )
+
+    # Align all pod deployment targets to iOS 16 to suppress warnings
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        if config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 16.0
+          config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+        end
+      end
+
+      # Mark shell script phases that have no outputs as always-out-of-date
+      # to suppress "will be run during every build" Xcode warnings
+      target.build_phases.each do |phase|
+        if phase.respond_to?(:shell_script) && phase.output_paths.empty?
+          phase.always_out_of_date = "1"
+        end
+      end
+    end
   end
 end
