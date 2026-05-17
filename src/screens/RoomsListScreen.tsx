@@ -12,6 +12,7 @@ import { useApp } from '../services/AppContext';
 import { deleteRoomFromFirestore } from '../services/firebase';
 import { DraftRoom } from '../utils/types';
 import { RoomsStackParams } from '../navigation/RootNavigator';
+import { findPendingMatchup } from '../utils/matchSuggestion';
 
 type Nav = NativeStackNavigationProp<RoomsStackParams>;
 
@@ -190,14 +191,29 @@ export default function RoomsListScreen() {
             }
           />
         }
-        renderItem={({ item }) => (
-          <RoomCard
-            room={item}
-            isActive={state.activeRoomId === item.id}
-            onOpen={() => openRoom(item.id)}
-            onDelete={() => deleteRoom(item)}
-          />
-        )}
+        renderItem={({ item }) => {
+          const pending = findPendingMatchup(item, state.currentUserId);
+          return (
+            <View>
+              <RoomCard
+                room={item}
+                isActive={state.activeRoomId === item.id}
+                onOpen={() => openRoom(item.id)}
+                onDelete={() => deleteRoom(item)}
+              />
+              {pending && (
+                <TouchableOpacity
+                  style={styles.matchBanner}
+                  onPress={() => openRoom(item.id)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.matchBannerTitle}>⚔️ Active Match Available</Text>
+                  <Text style={styles.matchBannerSub}>{pending.description} · Tap to open</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          );
+        }}
       />
     </SafeAreaView>
   );
@@ -266,4 +282,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
   },
   deleteAllText: { ...Typography.bodySM, color: Colors.redLight, letterSpacing: 0.5 },
+  matchBanner: {
+    marginHorizontal: Spacing.lg,
+    marginTop: -Spacing.xs,
+    marginBottom: Spacing.sm,
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderColor: Colors.blueLight,
+    borderBottomLeftRadius: Radius.md,
+    borderBottomRightRadius: Radius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    alignItems: 'center',
+  },
+  matchBannerTitle: {
+    ...Typography.labelSM,
+    color: Colors.gold,
+    letterSpacing: 1.1,
+  },
+  matchBannerSub: {
+    ...Typography.bodySM,
+    color: Colors.textMuted,
+    marginTop: 2,
+    textAlign: 'center',
+  },
 });

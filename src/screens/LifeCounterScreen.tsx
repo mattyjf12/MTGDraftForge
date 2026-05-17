@@ -915,16 +915,7 @@ export default function LifeCounterScreen() {
         </TouchableOpacity>
       )}
 
-      {currentMatchup && `${activeRoom!.id}|${currentMatchup.matchPlayers.map(p => p.id).sort().join('|')}` !== configuredMatchupKey && (
-        <TouchableOpacity style={s.matchupSetupBanner} onPress={configureForMatchup} activeOpacity={0.75}>
-          <Text style={s.podSetupTitle}>⚔️ Active Match Detected</Text>
-          <Text style={s.podSetupSub}>
-            Tap to configure · {currentMatchup.matchPlayers.map(p => p.name).join(' vs ')} · {currentMatchup.startingLife} life
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      {commanderMode && players.length >= 3 && players.length <= 4 ? (
+{commanderMode && players.length >= 3 && players.length <= 4 ? (
         // 2×2 no-scroll grid for commander pods
         <View style={s.commanderGrid}>
           <View style={s.commanderGridRow}>
