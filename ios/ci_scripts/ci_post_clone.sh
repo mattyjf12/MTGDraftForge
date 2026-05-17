@@ -61,4 +61,18 @@ echo "=== pod install ==="
 cd "$CI_PRIMARY_REPOSITORY_PATH/ios"
 pod install
 
+# --- patch Hermes scripts: replace any hardcoded absolute node path ---
+# The Pods/hermes-engine Script-*.sh files may have a developer's local node path
+# baked in if the Pods directory was committed. Replace it with the node in PATH.
+echo "=== Patching Hermes scripts ==="
+NODE_BIN=$(which node)
+echo "Using node: $NODE_BIN"
+find "$CI_PRIMARY_REPOSITORY_PATH/ios/Pods" -name "Script-*.sh" 2>/dev/null | while read -r script; do
+  if grep -q "/bin/node" "$script" 2>/dev/null; then
+    sed -i '' "s|[^ '\"]*nvm[^ '\"]*bin/node|$NODE_BIN|g" "$script"
+    sed -i '' "s|/tmp/node-[^ '\"'\"]*bin/node|$NODE_BIN|g" "$script"
+    echo "Patched: $script"
+  fi
+done
+
 echo "=== ci_post_clone.sh completed successfully ==="
