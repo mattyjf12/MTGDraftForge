@@ -39,6 +39,23 @@ echo "=== npm install ==="
 cd "$CI_PRIMARY_REPOSITORY_PATH"
 npm install
 
+# --- pre-download boost to bypass archives.boost.io DNS failure in Xcode Cloud ---
+# Use the JFrog mirror which serves the identical .tar.bz2 (same sha256).
+BOOST_URL="https://boostorg.jfrog.io/artifactory/main/release/1.83.0/source/boost_1_83_0.tar.bz2"
+BOOST_TAR="/tmp/boost_1_83_0.tar.bz2"
+BOOST_PODSPEC="$CI_PRIMARY_REPOSITORY_PATH/node_modules/react-native/third-party-podspecs/boost.podspec"
+
+if [ -f "$BOOST_PODSPEC" ]; then
+  echo "Downloading boost 1.83.0 from JFrog mirror..."
+  curl -fL "$BOOST_URL" -o "$BOOST_TAR"
+  echo "Patching boost podspec to use local file..."
+  # Replace URL with local file path; remove sha256 so CocoaPods skips the checksum
+  sed -i '' \
+    "s|{ :http => 'https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.bz2', :sha256 => '6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e' }|{ :http => 'file://${BOOST_TAR}' }|g" \
+    "$BOOST_PODSPEC"
+  echo "Patched boost podspec."
+fi
+
 # --- pod install ---
 echo "=== pod install ==="
 cd "$CI_PRIMARY_REPOSITORY_PATH/ios"
