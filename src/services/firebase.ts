@@ -10,6 +10,7 @@ import {
   doc,
   addDoc,
   setDoc,
+  updateDoc,
   deleteDoc,
   onSnapshot,
   serverTimestamp,
@@ -133,15 +134,60 @@ export async function deleteRoomFromFirestore(roomId: string): Promise<void> {
 /**
  * Write a room to Firestore (create or overwrite).
  * Called after any local state change that affects a room.
+ *
+ * Uses updateDoc so concurrent writes from different players don't clobber
+ * each other's data. rrResults is expanded to dot-notation field paths so
+ * each player only writes their own match key. Falls back to setDoc when the
+ * document doesn't exist yet (first write).
  */
 export async function syncRoomToFirestore(room: DraftRoom): Promise<void> {
   try {
-    await setDoc(doc(db, ROOMS_COLLECTION, room.id), {
-      ...room,
+    const docRef = doc(db, ROOMS_COLLECTION, room.id);
+    const { rrResults, ...rest } = room;
+
+    // Build update object. rrResults is expanded to dot-notation paths so
+    // concurrent writes from different players don't overwrite each other's
+    // results — each player only writes their own match key.
+    const update: Record<string, unknown> = {
+      ...rest,
+      _updatedAt: serverTimestamp(),
+    };
+    if (rrResults) {
+      Object.entries(rrResults).forEach(([key, value]) => {
+        update[`rrResults.${key}`] = value;
+      });
+    }
+
+    try {
+      await updateDoc(docRef, update);
+    } catch (err: any) {
+      if (err?.code === 'not-found') {
+        // First write — document doesn't exist yet
+        await setDoc(docRef, { ...room, _updatedAt: serverTimestamp() });
+      } else {
+        throw err;
+      }
+    }
+  } catch (err) {
+    console.warn('[Firebase] syncRoomToFirestore error:', err);
+  }
+}
+
+/**
+ * Patch specific fields in a room document without overwriting others.
+ * Use dot-notation keys (e.g. 'rrResults.key') for nested field updates.
+ */
+export async function patchRoomInFirestore(
+  roomId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await updateDoc(doc(db, ROOMS_COLLECTION, roomId), {
+      ...patch,
       _updatedAt: serverTimestamp(),
     });
   } catch (err) {
-    console.warn('[Firebase] syncRoomToFirestore error:', err);
+    console.warn('[Firebase] patchRoomInFirestore error:', err);
   }
 }
 
