@@ -1,68 +1,117 @@
 // BracketScreen.tsx
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Modal, TextInput,
   TouchableOpacity, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRoute, RouteProp } from '@react-navigation/native';
-import { Colors, Typography, Spacing, Radius, getSuggestedFormat, FORMATS } from '../theme';
+import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
+import { Colors, Typography, Spacing, Radius, getSuggestedFormat } from '../theme';
 import { Button, Card, Badge, Row, Divider, EmptyState, Label, MTGColorPips } from '../components/UI';
 import { useApp } from '../services/AppContext';
-import { BracketMatch, Player, RRResult } from '../utils/types';
+import { BracketMatch, Player, RRResult, Bo3GameResult } from '../utils/types';
 import { RoomsStackParams } from '../navigation/RootNavigator';
 import { getRRKey, generateRoundRobinSchedule, generateMultiGameRRSchedule, generateFixedGamesSchedule, MultiGameRRMatch } from '../utils/tournament';
 import { patchBracketMatch, patchMtgaMatchupResult } from '../services/firebase';
 
 type Route = RouteProp<RoomsStackParams, 'Bracket'>;
 
-// ── Log Result Modal (elimination only — no life logging) ────
-function LogResultModal({ match, players, onConfirm, onClose }: {
+function getBo3Record(games: Bo3GameResult[], winnerId: string): string {
+  const wWins = games.filter(g => g.winnerId === winnerId).length;
+  const lWins = games.length - wWins;
+  return `${wWins}-${lWins}`;
+}
+
+// ── Log Result Modal (elimination bracket) ────────────────────
+function LogResultModal({ match, players, onConfirm, onClose, title, isBo3 }: {
   match: BracketMatch;
   players: Player[];
-  onConfirm: (winnerId: string, loserId: string) => void;
+  onConfirm: (winnerId: string, loserId: string, games?: Bo3GameResult[]) => void;
   onClose: () => void;
+  title?: string;
+  isBo3?: boolean;
 }) {
   const [winnerId, setWinnerId] = useState('');
+  const emptyBo3 = () => [{ winnerId: '', life: '' }, { winnerId: '', life: '' }, { winnerId: '', life: '' }];
+  const [bo3Inputs, setBo3Inputs] = useState<Array<{ winnerId: string; life: string }>>(emptyBo3());
 
   const p1 = players.find(p => p.id === match.player1Id);
   const p2 = players.find(p => p.id === match.player2Id);
 
   function handleConfirm() {
+    if (isBo3) {
+      const filled = bo3Inputs.filter(g => g.winnerId !== '');
+      if (filled.length < 2) { Alert.alert('Log at least 2 games'); return; }
+      const scores: Record<string, number> = {};
+      filled.forEach(g => { scores[g.winnerId] = (scores[g.winnerId] || 0) + 1; });
+      const entry = Object.entries(scores).find(([, w]) => w >= 2);
+      if (!entry) { Alert.alert('No clear winner', 'One player must win 2 games'); return; }
+      const [wId] = entry;
+      const lId = wId === match.player1Id ? match.player2Id! : match.player1Id!;
+      onConfirm(wId, lId, filled.map(g => ({ winnerId: g.winnerId, winnerFinalLife: parseInt(g.life) || 0 })));
+      return;
+    }
     if (!winnerId) { Alert.alert('Select a winner'); return; }
     const loserId = winnerId === match.player1Id ? match.player2Id! : match.player1Id!;
     onConfirm(winnerId, loserId);
   }
 
+  const needsGame3 = isBo3 && bo3Inputs[0].winnerId && bo3Inputs[1].winnerId && bo3Inputs[0].winnerId !== bo3Inputs[1].winnerId;
+
   return (
     <Modal transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
-        <View style={styles.modalCard}>
-          <Text style={styles.modalTitle}>📝 Log Match Result</Text>
+        <View style={[styles.modalCard, { maxHeight: '90%' }]}>
+          <Text style={styles.modalTitle}>{title ?? '📝 Log Match Result'}</Text>
           <Text style={styles.modalMatch}>{p1?.name} vs {p2?.name}</Text>
           <Divider />
-
-          <Label>Winner</Label>
-          {[
-            { p: p1, slot: 'p1' },
-            { p: p2, slot: 'p2' },
-          ].filter(({ p }) => Boolean(p)).map(({ p, slot }) => (
-            <TouchableOpacity
-              key={slot}
-              style={[styles.winnerOption, winnerId === p!.id && styles.winnerOptionSelected]}
-              onPress={() => setWinnerId(p!.id)}
-            >
-              <View style={[styles.radioCircle, winnerId === p!.id && styles.radioSelected]}>
-                {winnerId === p!.id && <View style={styles.radioInner} />}
-              </View>
-              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={[styles.winnerName, winnerId === p!.id && { color: Colors.gold }, { flex: 0 }]}>{p!.name}</Text>
-                <MTGColorPips colors={p?.deckColors ?? []} size="sm" />
-              </View>
-              {winnerId === p!.id && <Text style={{ fontSize: 16 }}>🏆</Text>}
-            </TouchableOpacity>
-          ))}
-
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          {isBo3 ? (
+            [0, 1, 2].map(gi => {
+              const disabled = gi === 2 && !needsGame3;
+              const g = bo3Inputs[gi];
+              return (
+                <View key={gi} style={{ marginBottom: Spacing.md, opacity: disabled ? 0.35 : 1 }}>
+                  <Label>Game {gi + 1}{gi === 2 && !needsGame3 ? ' (if needed)' : ''}</Label>
+                  {[p1, p2].filter(Boolean).map(p => (
+                    <TouchableOpacity key={p!.id} disabled={!!disabled}
+                      style={[styles.winnerOption, g.winnerId === p!.id && styles.winnerOptionSelected]}
+                      onPress={() => setBo3Inputs(prev => prev.map((x, i) => i === gi ? { ...x, winnerId: p!.id } : x))}>
+                      <View style={[styles.radioCircle, g.winnerId === p!.id && styles.radioSelected]}>
+                        {g.winnerId === p!.id && <View style={styles.radioInner} />}
+                      </View>
+                      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={[styles.winnerName, g.winnerId === p!.id && { color: Colors.gold }, { flex: 0 }]}>{p!.name}</Text>
+                        <MTGColorPips colors={p?.deckColors ?? []} size="sm" />
+                      </View>
+                      {g.winnerId === p!.id && <Text style={{ fontSize: 16 }}>🏆</Text>}
+                    </TouchableOpacity>
+                  ))}
+                  <TextInput style={[styles.lifeInput, { marginTop: 4 }]} placeholder="Winner's life total" placeholderTextColor={Colors.textFaint} keyboardType="numeric" editable={!disabled} value={g.life}
+                    onChangeText={v => setBo3Inputs(prev => prev.map((x, i) => i === gi ? { ...x, life: v } : x))} />
+                </View>
+              );
+            })
+          ) : (
+            <>
+              <Label>Winner</Label>
+              {[{ p: p1, slot: 'p1' }, { p: p2, slot: 'p2' }].filter(({ p }) => Boolean(p)).map(({ p, slot }) => (
+                <TouchableOpacity key={slot}
+                  style={[styles.winnerOption, winnerId === p!.id && styles.winnerOptionSelected]}
+                  onPress={() => setWinnerId(p!.id)}>
+                  <View style={[styles.radioCircle, winnerId === p!.id && styles.radioSelected]}>
+                    {winnerId === p!.id && <View style={styles.radioInner} />}
+                  </View>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.winnerName, winnerId === p!.id && { color: Colors.gold }, { flex: 0 }]}>{p!.name}</Text>
+                    <MTGColorPips colors={p?.deckColors ?? []} size="sm" />
+                  </View>
+                  {winnerId === p!.id && <Text style={{ fontSize: 16 }}>🏆</Text>}
+                </TouchableOpacity>
+              ))}
+            </>
+          )}
+          </ScrollView>
           <Row style={{ gap: 10, marginTop: Spacing.lg }}>
             <Button label="Confirm" onPress={handleConfirm} style={{ flex: 1 }} />
             <Button label="Cancel" onPress={onClose} variant="outline" style={{ flex: 1 }} />
@@ -76,8 +125,11 @@ function LogResultModal({ match, players, onConfirm, onClose }: {
 // ── Elimination bracket ───────────────────────
 function EliminationBracket({ roomId }: { roomId: string }) {
   const { state, dispatch } = useApp();
+  const navigation = useNavigation<any>();
   const room = state.rooms.find(r => r.id === roomId)!;
+  const isOwner = room.ownerId === state.currentUserId;
   const [selectedMatch, setSelectedMatch] = useState<BracketMatch | null>(null);
+  const [isOverride, setIsOverride] = useState(false);
 
   // Build seed map for seeded / two_phase-phase-2 brackets.
   // Both formats store seeds directly on player.seed — seeded format has them
@@ -89,16 +141,17 @@ function EliminationBracket({ roomId }: { roomId: string }) {
   const showSeeds = Object.keys(seedMap).length > 0;
 
   const bracket = room.bracket || [];
-  const winnersBracket = bracket.filter(m => m.bracket === 'winners' || m.bracket === 'grand_final');
 
-  // Group by round
-  const rounds: Record<number, BracketMatch[]> = {};
-  winnersBracket.forEach(m => {
-    if (!rounds[m.round]) rounds[m.round] = [];
-    rounds[m.round].push(m);
-  });
+  const { rounds, roundNumbers } = useMemo(() => {
+    const winnersBracket = bracket.filter(m => m.bracket === 'winners' || m.bracket === 'grand_final');
+    const r: Record<number, BracketMatch[]> = {};
+    winnersBracket.forEach(m => {
+      if (!r[m.round]) r[m.round] = [];
+      r[m.round].push(m);
+    });
+    return { rounds: r, roundNumbers: Object.keys(r).map(Number).sort((a, b) => a - b) };
+  }, [bracket]);
 
-  const roundNumbers = Object.keys(rounds).map(Number).sort((a, b) => a - b);
   const totalRounds = roundNumbers.length;
 
   function getRoundLabel(roundIdx: number): string {
@@ -109,16 +162,32 @@ function EliminationBracket({ roomId }: { roomId: string }) {
     return `Round ${roundIdx + 1}`;
   }
 
-  function handleLogResult(winnerId: string, loserId: string) {
+  function handlePlay(p1Name: string, p2Name: string) {
+    const startingLife = room.settings?.startingLife ?? 20;
     dispatch({
-      type: 'LOG_ELIM_RESULT',
-      roomId,
-      matchId: selectedMatch!.id,
-      winnerId, loserId,
-      winnerLife: 0, loserLife: 0,
+      type: 'SET_PENDING_MATCHUP_CONFIG',
+      config: { playerNames: [p1Name, p2Name], startingLife },
     });
-    patchBracketMatch(roomId, selectedMatch!.id, winnerId, loserId, 0, 0);
+    navigation.getParent()?.navigate('LifeCounter');
+  }
+
+  function handleLogResult(winnerId: string, loserId: string, games?: Bo3GameResult[]) {
+    if (isOverride) {
+      dispatch({ type: 'OVERRIDE_ELIM_RESULT', roomId, matchId: selectedMatch!.id, winnerId, loserId });
+      // Full room sync handled by AppProvider state-change effect
+    } else {
+      dispatch({
+        type: 'LOG_ELIM_RESULT',
+        roomId,
+        matchId: selectedMatch!.id,
+        winnerId, loserId,
+        winnerLife: 0, loserLife: 0,
+        games,
+      });
+      patchBracketMatch(roomId, selectedMatch!.id, winnerId, loserId, 0, 0);
+    }
     setSelectedMatch(null);
+    setIsOverride(false);
   }
 
   return (
@@ -128,7 +197,9 @@ function EliminationBracket({ roomId }: { roomId: string }) {
           match={selectedMatch}
           players={room.players}
           onConfirm={handleLogResult}
-          onClose={() => setSelectedMatch(null)}
+          onClose={() => { setSelectedMatch(null); setIsOverride(false); }}
+          title={isOverride ? '✏️ Override Match Result' : undefined}
+          isBo3={!isOverride && (room.settings?.bestOf3 ?? false)}
         />
       )}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -177,12 +248,40 @@ function EliminationBracket({ roomId }: { roomId: string }) {
                         );
                       })}
                     </View>
-                    {!isComplete && p1 && p2 && (
+                    {isComplete && match.result?.games && match.result.games.length > 0 && (
+                      <Text style={styles.bo3RecordTag}>
+                        {getBo3Record(match.result.games, match.result.winnerId!)}
+                      </Text>
+                    )}
+                    {!isComplete && (() => {
+                      const partial = room.bo3InProgress?.[match.id] ?? [];
+                      if (!partial.length) return null;
+                      const p1w = partial.filter(g => g.winnerId === match.player1Id).length;
+                      const p2w = partial.filter(g => g.winnerId === match.player2Id).length;
+                      return <Text style={styles.bo3RecordTag}>{p1w}-{p2w}</Text>;
+                    })()}
+                    {!isComplete && p1 && p2 && (match.player1Id === state.currentUserId || match.player2Id === state.currentUserId) && (
+                      <TouchableOpacity
+                        style={[styles.logBtn, styles.playBtn]}
+                        onPress={() => handlePlay(p1.name, p2.name)}
+                      >
+                        <Text style={styles.playBtnText}>▶ PLAY</Text>
+                      </TouchableOpacity>
+                    )}
+                    {!isComplete && p1 && p2 && isOwner && match.player1Id !== state.currentUserId && match.player2Id !== state.currentUserId && (
                       <TouchableOpacity
                         style={styles.logBtn}
-                        onPress={() => setSelectedMatch(match)}
+                        onPress={() => { setIsOverride(false); setSelectedMatch(match); }}
                       >
                         <Text style={styles.logBtnText}>LOG RESULT</Text>
+                      </TouchableOpacity>
+                    )}
+                    {isComplete && isOwner && (
+                      <TouchableOpacity
+                        style={[styles.logBtn, styles.overrideBtn]}
+                        onPress={() => { setIsOverride(true); setSelectedMatch(match); }}
+                      >
+                        <Text style={styles.overrideBtnText}>✏️ OVERRIDE</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -202,70 +301,101 @@ function EliminationBracket({ roomId }: { roomId: string }) {
 function RoundRobinBracket({ roomId, isTwoPhase = false }: { roomId: string; isTwoPhase?: boolean }) {
   const { state, dispatch } = useApp();
   const room = state.rooms.find(r => r.id === roomId)!;
+  const isOwner = room.ownerId === state.currentUserId;
   const [modal, setModal] = useState<{ p1: Player; p2: Player; gameKey: string } | null>(null);
+  const [isOverride, setIsOverride] = useState(false);
   const [winnerId, setWinnerId] = useState('');
   const [winnerLife, setWinnerLife] = useState('');
+  const isBo3 = room.settings?.bestOf3 === true;
+  const emptyBo3RR = () => [{ winnerId: '', life: '' }, { winnerId: '', life: '' }, { winnerId: '', life: '' }];
+  const [bo3GameInputs, setBo3GameInputs] = useState<Array<{ winnerId: string; life: string }>>(emptyBo3RR());
 
   const results = room.rrResults || {};
   const gamesCount = room.settings.rrGamesCount ?? 1;
-
-  // Accumulated winner life per player across all logged RR results
-  const playerLifeTotals: Record<string, number> = {};
-  Object.values(results).forEach(r => {
-    playerLifeTotals[r.winnerId] = (playerLifeTotals[r.winnerId] || 0) + r.winnerFinalLife;
-  });
-
   const phase1Mode = room.settings.phase1Mode ?? 'round_robin';
 
+  const playerLifeTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+    Object.values(results).forEach(r => {
+      totals[r.winnerId] = (totals[r.winnerId] || 0) + r.winnerFinalLife;
+    });
+    return totals;
+  }, [results]);
+
   // Build a unified schedule where each match has a unique gameKey
-  const schedule: Array<{ roundLabel: string; matches: MultiGameRRMatch[] }> = isTwoPhase
-    ? (() => {
-        if (phase1Mode === 'fixed_games') {
-          // Fixed: gamesCount rounds following RR rotation
-          return generateFixedGamesSchedule(room.players, gamesCount).map((round, ri) => ({
-            roundLabel: `Round ${ri + 1}`,
-            matches: round,
-          }));
-        }
-        // Full round robin (possibly multiple cycles)
-        const baseRounds = room.players.length % 2 === 0
-          ? room.players.length - 1
-          : room.players.length;
-        return generateMultiGameRRSchedule(room.players, gamesCount).map((round, ri) => ({
-          roundLabel: gamesCount > 1
-            ? `Game ${Math.floor(ri / baseRounds) + 1}/${gamesCount} · Round ${(ri % baseRounds) + 1}`
-            : `Round ${ri + 1}`,
+  const schedule = useMemo((): Array<{ roundLabel: string; matches: MultiGameRRMatch[] }> => {
+    if (isTwoPhase) {
+      if (phase1Mode === 'fixed_games') {
+        return generateFixedGamesSchedule(room.players, gamesCount).map((round, ri) => ({
+          roundLabel: `Round ${ri + 1}`,
           matches: round,
         }));
-      })()
-    : generateRoundRobinSchedule(room.players).map((round, ri) => ({
-        roundLabel: `Round ${ri + 1}`,
-        matches: round.map(([p1id, p2id]) => ({
-          p1id, p2id, gameKey: getRRKey(p1id, p2id),
-        })),
+      }
+      const baseRounds = room.players.length % 2 === 0
+        ? room.players.length - 1
+        : room.players.length;
+      return generateMultiGameRRSchedule(room.players, gamesCount).map((round, ri) => ({
+        roundLabel: gamesCount > 1
+          ? `Game ${Math.floor(ri / baseRounds) + 1}/${gamesCount} · Round ${(ri % baseRounds) + 1}`
+          : `Round ${ri + 1}`,
+        matches: round,
       }));
+    }
+    return generateRoundRobinSchedule(room.players).map((round, ri) => ({
+      roundLabel: `Round ${ri + 1}`,
+      matches: round.map(([p1id, p2id]) => ({
+        p1id, p2id, gameKey: getRRKey(p1id, p2id),
+      })),
+    }));
+  }, [room.players, gamesCount, phase1Mode, isTwoPhase]);
+
+  const lifeSummary = useMemo(() =>
+    room.players
+      .map(p => ({ name: p.name, id: p.id, life: playerLifeTotals[p.id] || 0 }))
+      .filter(p => p.life > 0)
+      .sort((a, b) => b.life - a.life),
+    [room.players, playerLifeTotals],
+  );
 
   function logRRResult() {
-    if (!modal || !winnerId) return;
-    const loserId = winnerId === modal.p1.id ? modal.p2.id : modal.p1.id;
+    if (!modal) return;
+
+    let finalWinnerId: string;
+    let finalWinnerLife: number;
+    let games: Bo3GameResult[] | undefined;
+
+    if (isBo3 && !isOverride) {
+      const filled = bo3GameInputs.filter(g => g.winnerId !== '');
+      if (filled.length < 2) { Alert.alert('Log at least 2 games'); return; }
+      const scores: Record<string, number> = {};
+      filled.forEach(g => { scores[g.winnerId] = (scores[g.winnerId] || 0) + 1; });
+      const entry = Object.entries(scores).find(([, w]) => w >= 2);
+      if (!entry) { Alert.alert('No clear winner', 'One player must win 2 games'); return; }
+      finalWinnerId = entry[0];
+      finalWinnerLife = parseInt(filled[filled.length - 1].life) || 0;
+      games = filled.map(g => ({ winnerId: g.winnerId, winnerFinalLife: parseInt(g.life) || 0 }));
+    } else {
+      if (!winnerId) return;
+      finalWinnerId = winnerId;
+      finalWinnerLife = parseInt(winnerLife) || 0;
+    }
+
+    const loserId = finalWinnerId === modal.p1.id ? modal.p2.id : modal.p1.id;
     const result: RRResult = {
       player1Id: modal.p1.id,
       player2Id: modal.p2.id,
-      winnerId,
+      winnerId: finalWinnerId,
       loserId,
-      winnerFinalLife: parseInt(winnerLife) || 0,
+      winnerFinalLife: finalWinnerLife,
       completedAt: Date.now(),
       gameKey: modal.gameKey,
+      games,
     };
+    // LOG_RR_RESULT overwrites an existing result for the same key, so it
+    // doubles as the override action for round-robin matches.
     dispatch({ type: 'LOG_RR_RESULT', roomId, result });
-    setModal(null); setWinnerId(''); setWinnerLife('');
+    setModal(null); setWinnerId(''); setWinnerLife(''); setIsOverride(false); setBo3GameInputs(emptyBo3RR());
   }
-
-  // Players sorted by accumulated life total (for the summary banner)
-  const lifeSummary = room.players
-    .map(p => ({ name: p.name, id: p.id, life: playerLifeTotals[p.id] || 0 }))
-    .filter(p => p.life > 0)
-    .sort((a, b) => b.life - a.life);
 
   return (
     <View>
@@ -285,41 +415,76 @@ function RoundRobinBracket({ roomId, isTwoPhase = false }: { roomId: string; isT
       )}
 
       {modal && (
-        <Modal transparent animationType="slide" onRequestClose={() => setModal(null)}>
+        <Modal transparent animationType="slide" onRequestClose={() => { setModal(null); setIsOverride(false); setBo3GameInputs(emptyBo3RR()); }}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>📝 Log Match</Text>
+            <View style={[styles.modalCard, { maxHeight: '90%' }]}>
+              <Text style={styles.modalTitle}>{isOverride ? '✏️ Override Match' : '📝 Log Match'}</Text>
               <Text style={styles.modalMatch}>{modal.p1.name} vs {modal.p2.name}</Text>
               <Divider />
-              <Label>Winner</Label>
-              {[modal.p1, modal.p2].map(p => (
-                <TouchableOpacity
-                  key={p.id}
-                  style={[styles.winnerOption, winnerId === p.id && styles.winnerOptionSelected]}
-                  onPress={() => setWinnerId(p.id)}
-                >
-                  <View style={[styles.radioCircle, winnerId === p.id && styles.radioSelected]}>
-                    {winnerId === p.id && <View style={styles.radioInner} />}
-                  </View>
-                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={[styles.winnerName, winnerId === p.id && { color: Colors.gold }, { flex: 0 }]}>{p.name}</Text>
-                    <MTGColorPips colors={p?.deckColors ?? []} size="sm" />
-                  </View>
-                </TouchableOpacity>
-              ))}
-              <Label style={{ marginTop: Spacing.md }}>Winner's Final Life</Label>
-              <TextInput
-                style={styles.lifeInput}
-                placeholder="e.g. 12"
-                placeholderTextColor={Colors.textFaint}
-                keyboardType="numeric"
-                value={winnerLife}
-                onChangeText={setWinnerLife}
-              />
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {isBo3 && !isOverride ? (
+                (() => {
+                  const needsGame3 = bo3GameInputs[0].winnerId && bo3GameInputs[1].winnerId && bo3GameInputs[0].winnerId !== bo3GameInputs[1].winnerId;
+                  return [0, 1, 2].map(gi => {
+                    const disabled = gi === 2 && !needsGame3;
+                    const g = bo3GameInputs[gi];
+                    return (
+                      <View key={gi} style={{ marginBottom: Spacing.md, opacity: disabled ? 0.35 : 1 }}>
+                        <Label>Game {gi + 1}{gi === 2 && !needsGame3 ? ' (if needed)' : ''}</Label>
+                        {[modal.p1, modal.p2].map(p => (
+                          <TouchableOpacity key={p.id} disabled={!!disabled}
+                            style={[styles.winnerOption, g.winnerId === p.id && styles.winnerOptionSelected]}
+                            onPress={() => setBo3GameInputs(prev => prev.map((x, i) => i === gi ? { ...x, winnerId: p.id } : x))}>
+                            <View style={[styles.radioCircle, g.winnerId === p.id && styles.radioSelected]}>
+                              {g.winnerId === p.id && <View style={styles.radioInner} />}
+                            </View>
+                            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Text style={[styles.winnerName, g.winnerId === p.id && { color: Colors.gold }, { flex: 0 }]}>{p.name}</Text>
+                              <MTGColorPips colors={p?.deckColors ?? []} size="sm" />
+                            </View>
+                            {g.winnerId === p.id && <Text style={{ fontSize: 16 }}>🏆</Text>}
+                          </TouchableOpacity>
+                        ))}
+                        <TextInput style={[styles.lifeInput, { marginTop: 4 }]} placeholder="Winner's life total" placeholderTextColor={Colors.textFaint} keyboardType="numeric" editable={!disabled} value={g.life}
+                          onChangeText={v => setBo3GameInputs(prev => prev.map((x, i) => i === gi ? { ...x, life: v } : x))} />
+                      </View>
+                    );
+                  });
+                })()
+              ) : (
+                <>
+                  <Label>Winner</Label>
+                  {[modal.p1, modal.p2].map(p => (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={[styles.winnerOption, winnerId === p.id && styles.winnerOptionSelected]}
+                      onPress={() => setWinnerId(p.id)}
+                    >
+                      <View style={[styles.radioCircle, winnerId === p.id && styles.radioSelected]}>
+                        {winnerId === p.id && <View style={styles.radioInner} />}
+                      </View>
+                      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={[styles.winnerName, winnerId === p.id && { color: Colors.gold }, { flex: 0 }]}>{p.name}</Text>
+                        <MTGColorPips colors={p?.deckColors ?? []} size="sm" />
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                  <Label style={{ marginTop: Spacing.md }}>Winner's Final Life</Label>
+                  <TextInput
+                    style={styles.lifeInput}
+                    placeholder="e.g. 12"
+                    placeholderTextColor={Colors.textFaint}
+                    keyboardType="numeric"
+                    value={winnerLife}
+                    onChangeText={setWinnerLife}
+                  />
+                </>
+              )}
+              </ScrollView>
               <Row style={{ gap: 10, marginTop: Spacing.lg }}>
                 <Button label="Confirm" onPress={logRRResult} style={{ flex: 1 }} />
-                <Button label="Cancel" onPress={() => setModal(null)} variant="outline" style={{ flex: 1 }} />
+                <Button label="Cancel" onPress={() => { setModal(null); setIsOverride(false); setBo3GameInputs(emptyBo3RR()); }} variant="outline" style={{ flex: 1 }} />
               </Row>
             </View>
           </View>
@@ -327,12 +492,14 @@ function RoundRobinBracket({ roomId, isTwoPhase = false }: { roomId: string; isT
         </Modal>
       )}
 
-      {schedule.map(({ roundLabel, matches }, ri) => (
+      {(() => {
+        const playerMap = new Map(room.players.map(p => [p.id, p]));
+        return schedule.map(({ roundLabel, matches }, ri) => (
         <Card key={ri} style={{ marginBottom: Spacing.sm }}>
           <Text style={styles.roundLabel}>{roundLabel}</Text>
           {matches.map(({ p1id, p2id, gameKey }) => {
-            const p1 = room.players.find(p => p.id === p1id)!;
-            const p2 = room.players.find(p => p.id === p2id)!;
+            const p1 = playerMap.get(p1id)!;
+            const p2 = playerMap.get(p2id)!;
             if (!p1 || !p2) return null;
             const res = results[gameKey];
             return (
@@ -345,23 +512,47 @@ function RoundRobinBracket({ roomId, isTwoPhase = false }: { roomId: string; isT
                 {res ? (
                   <View style={styles.rrResult}>
                     <Badge label="Done" variant="green" />
+                    {res.games && res.games.length > 0 && (
+                      <Text style={styles.bo3RecordTag}>{getBo3Record(res.games, res.winnerId)}</Text>
+                    )}
                     {res.winnerFinalLife > 0 && (
                       <Text style={styles.rrLifeTag}>♥ {res.winnerFinalLife}</Text>
                     )}
+                    {isOwner && (
+                      <TouchableOpacity
+                        style={[styles.logBtn, styles.overrideBtn]}
+                        onPress={() => { setIsOverride(true); setWinnerId(''); setWinnerLife(''); setBo3GameInputs(emptyBo3RR()); setModal({ p1, p2, gameKey }); }}
+                      >
+                        <Text style={styles.overrideBtnText}>✏️</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.logBtn}
-                    onPress={() => setModal({ p1, p2, gameKey })}
-                  >
-                    <Text style={styles.logBtnText}>LOG</Text>
-                  </TouchableOpacity>
-                )}
+                ) : (() => {
+                  const partial = room.bo3InProgress?.[gameKey] ?? [];
+                  const p1w = partial.filter(g => g.winnerId === p1id).length;
+                  const p2w = partial.filter(g => g.winnerId === p2id).length;
+                  return (
+                    <View style={styles.rrResult}>
+                      {partial.length > 0 && (
+                        <Text style={styles.bo3RecordTag}>{p1w}-{p2w}</Text>
+                      )}
+                      {(isOwner || p1id === state.currentUserId || p2id === state.currentUserId) && (
+                        <TouchableOpacity
+                          style={styles.logBtn}
+                          onPress={() => { setIsOverride(false); setModal({ p1, p2, gameKey }); }}
+                        >
+                          <Text style={styles.logBtnText}>LOG</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })()}
               </View>
             );
           })}
         </Card>
-      ))}
+      ));
+      })()}
     </View>
   );
 }
@@ -370,27 +561,32 @@ function RoundRobinBracket({ roomId, isTwoPhase = false }: { roomId: string; isT
 function MTGABracket({ roomId }: { roomId: string }) {
   const { state, dispatch } = useApp();
   const room = state.rooms.find(r => r.id === roomId)!;
+  const isOwner = room.ownerId === state.currentUserId;
   const records = room.mtgaRecords || [];
   const rounds = room.mtgaRounds || [];
   const [selectedMatchup, setSelectedMatchup] = useState<{
     matchupId: string; roundNumber: number;
     p1Id: string; p2Id: string;
     p1Name: string; p2Name: string;
+    isOverride?: boolean;
   } | null>(null);
   const [winnerId, setWinnerId] = useState('');
   const [expandedRounds, setExpandedRounds] = useState<Set<number>>(new Set());
 
-  const currentRound = [...rounds].reverse().find(r => !r.isComplete) ?? rounds[rounds.length - 1];
+  const currentRound = rounds.slice().reverse().find(r => !r.isComplete) ?? rounds[rounds.length - 1];
   const pastRounds = rounds.filter(r => r.isComplete);
   const activePlayers = records.filter(r => r.active);
   const champion = activePlayers.length === 1 ? activePlayers[0] : null;
 
+  const playerMap = useMemo(() => new Map(room.players.map(p => [p.id, p])), [room.players]);
+  const recordMap = useMemo(() => new Map(records.map(r => [r.playerId, r])), [records]);
+
   function getPlayerName(id: string | null) {
     if (!id) return 'TBD';
-    return room.players.find(p => p.id === id)?.name ?? 'Unknown';
+    return playerMap.get(id)?.name ?? 'Unknown';
   }
   function getRecord(id: string) {
-    return records.find(r => r.playerId === id) ?? { wins: 0, losses: 0, active: true };
+    return recordMap.get(id) ?? { wins: 0, losses: 0, active: true };
   }
   function recordLabel(id: string) {
     const r = getRecord(id);
@@ -400,15 +596,27 @@ function MTGABracket({ roomId }: { roomId: string }) {
   function confirmResult() {
     if (!selectedMatchup || !winnerId) return;
     const loserId = winnerId === selectedMatchup.p1Id ? selectedMatchup.p2Id : selectedMatchup.p1Id;
-    dispatch({
-      type: 'LOG_MTGA_MATCHUP_RESULT',
-      roomId,
-      roundNumber: selectedMatchup.roundNumber,
-      matchupId: selectedMatchup.matchupId,
-      winnerId,
-      loserId,
-    });
-    patchMtgaMatchupResult(roomId, selectedMatchup.roundNumber, selectedMatchup.matchupId, winnerId, loserId);
+    if (selectedMatchup.isOverride) {
+      dispatch({
+        type: 'OVERRIDE_MTGA_MATCHUP_RESULT',
+        roomId,
+        roundNumber: selectedMatchup.roundNumber,
+        matchupId: selectedMatchup.matchupId,
+        winnerId,
+        loserId,
+      });
+      // Full room sync handled by AppProvider state-change effect
+    } else {
+      dispatch({
+        type: 'LOG_MTGA_MATCHUP_RESULT',
+        roomId,
+        roundNumber: selectedMatchup.roundNumber,
+        matchupId: selectedMatchup.matchupId,
+        winnerId,
+        loserId,
+      });
+      patchMtgaMatchupResult(roomId, selectedMatchup.roundNumber, selectedMatchup.matchupId, winnerId, loserId);
+    }
     setSelectedMatchup(null);
     setWinnerId('');
   }
@@ -423,12 +631,12 @@ function MTGABracket({ roomId }: { roomId: string }) {
 
   return (
     <View>
-      {/* Log result modal */}
+      {/* Log / Override result modal */}
       {selectedMatchup && (
         <Modal transparent animationType="slide" onRequestClose={() => setSelectedMatchup(null)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>📝 Log Match Result</Text>
+              <Text style={styles.modalTitle}>{selectedMatchup.isOverride ? '✏️ Override Match Result' : '📝 Log Match Result'}</Text>
               <Text style={styles.modalMatch}>
                 {selectedMatchup.p1Name} vs {selectedMatchup.p2Name}
               </Text>
@@ -503,7 +711,7 @@ function MTGABracket({ roomId }: { roomId: string }) {
                     <>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <Text style={[styles.rrPlayerName, { color: Colors.gold }]}>{getPlayerName(m.player1Id)}</Text>
-                        <MTGColorPips colors={room.players.find(p => p.id === m.player1Id)?.deckColors ?? []} size="sm" />
+                        <MTGColorPips colors={playerMap.get(m.player1Id)?.deckColors ?? []} size="sm" />
                       </View>
                       <Text style={styles.vsText}>{recordLabel(m.player1Id)} · BYE</Text>
                     </>
@@ -517,7 +725,7 @@ function MTGABracket({ roomId }: { roomId: string }) {
                         ]}>
                           {getPlayerName(m.player1Id)}
                         </Text>
-                        <MTGColorPips colors={room.players.find(p => p.id === m.player1Id)?.deckColors ?? []} size="sm" />
+                        <MTGColorPips colors={playerMap.get(m.player1Id)?.deckColors ?? []} size="sm" />
                       </View>
                       <Text style={styles.vsText}>{recordLabel(m.player1Id)}</Text>
                       <Text style={[styles.vsText, { marginTop: 2 }]}>vs</Text>
@@ -529,7 +737,7 @@ function MTGABracket({ roomId }: { roomId: string }) {
                         ]}>
                           {getPlayerName(m.player2Id)}
                         </Text>
-                        <MTGColorPips colors={room.players.find(p => p.id === m.player2Id)?.deckColors ?? []} size="sm" />
+                        <MTGColorPips colors={playerMap.get(m.player2Id ?? '')?.deckColors ?? []} size="sm" />
                       </View>
                       <Text style={styles.vsText}>{recordLabel(m.player2Id!)}</Text>
                     </>
@@ -543,8 +751,16 @@ function MTGABracket({ roomId }: { roomId: string }) {
                     <>
                       <Badge label="Done" variant="green" />
                       <Text style={styles.rrLifeTag}>🏆 {getPlayerName(m.winnerId!)}</Text>
+                      {isOwner && (
+                        <TouchableOpacity
+                          style={[styles.logBtn, styles.overrideBtn]}
+                          onPress={() => { setWinnerId(''); setSelectedMatchup({ matchupId: m.id, roundNumber: currentRound.roundNumber, p1Id: m.player1Id, p2Id: m.player2Id!, p1Name: getPlayerName(m.player1Id), p2Name: getPlayerName(m.player2Id), isOverride: true }); }}
+                        >
+                          <Text style={styles.overrideBtnText}>✏️ OVERRIDE</Text>
+                        </TouchableOpacity>
+                      )}
                     </>
-                  ) : (
+                  ) : (isOwner || m.player1Id === state.currentUserId || m.player2Id === state.currentUserId) ? (
                     <TouchableOpacity
                       style={styles.logBtn}
                       onPress={() => setSelectedMatchup({
@@ -558,7 +774,7 @@ function MTGABracket({ roomId }: { roomId: string }) {
                     >
                       <Text style={styles.logBtnText}>LOG RESULT</Text>
                     </TouchableOpacity>
-                  )}
+                  ) : null}
                 </View>
               </View>
             );
@@ -623,9 +839,19 @@ function MTGABracket({ roomId }: { roomId: string }) {
                             </Text>
                           )}
                         </View>
-                        {m.winnerId && !m.isBye && (
-                          <Text style={styles.rrLifeTag}>🏆 {getPlayerName(m.winnerId)}</Text>
-                        )}
+                        <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                          {m.winnerId && !m.isBye && (
+                            <Text style={styles.rrLifeTag}>🏆 {getPlayerName(m.winnerId)}</Text>
+                          )}
+                          {m.winnerId && !m.isBye && isOwner && (
+                            <TouchableOpacity
+                              style={[styles.logBtn, styles.overrideBtn]}
+                              onPress={() => { setWinnerId(''); setSelectedMatchup({ matchupId: m.id, roundNumber: round.roundNumber, p1Id: m.player1Id, p2Id: m.player2Id!, p1Name: getPlayerName(m.player1Id), p2Name: getPlayerName(m.player2Id), isOverride: true }); }}
+                            >
+                              <Text style={styles.overrideBtnText}>✏️</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
                       </View>
                     ))}
                   </View>
@@ -707,6 +933,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logBtnText: { ...Typography.labelGold, fontSize: 9 },
+  playBtn: {
+    borderColor: Colors.gold,
+    backgroundColor: Colors.goldGlow,
+  },
+  playBtnText: { ...Typography.labelGold, fontSize: 9, color: Colors.gold },
   lifeTag: { ...Typography.labelSM, textAlign: 'center', color: Colors.textFaint },
   modalOverlay: {
     flex: 1,
@@ -754,6 +985,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     textAlign: 'center',
     fontFamily: 'Georgia',
+  },
+  bo3RecordTag: {
+    fontFamily: 'Georgia',
+    fontSize: 12,
+    color: Colors.textMuted,
+    letterSpacing: 0.5,
+    textAlign: 'center',
   },
   rrMatchRow: {
     flexDirection: 'row',
@@ -815,4 +1053,10 @@ const styles = StyleSheet.create({
   mtgaStandingRank: { fontFamily: 'Georgia', fontSize: 14, color: Colors.gold, minWidth: 28 },
   mtgaStandingName: { ...Typography.bodyMD, flex: 1 },
   mtgaStandingRecord: { ...Typography.bodySM, color: Colors.textMuted },
+  overrideBtn: {
+    borderColor: Colors.textMuted,
+    backgroundColor: 'transparent',
+    marginTop: 2,
+  },
+  overrideBtnText: { ...Typography.labelSM, fontSize: 9, color: Colors.textMuted },
 });

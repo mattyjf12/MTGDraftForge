@@ -4,12 +4,11 @@
 // ─────────────────────────────────────────────
 import React, { createContext, useContext, useEffect, useReducer, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { DraftRoom, Player, MatchResult, RRResult, AppNotification, MTGARound, MTGColor, TournamentHistoryEntry, CommanderPod, CommanderPodResult } from '../utils/types';
+import { DraftRoom, Player, RRResult, AppNotification, MTGARound, MTGColor, TournamentHistoryEntry, CommanderPod, CommanderPodResult, BracketMatch, Bo3GameResult } from '../utils/types';
 import { FormatId } from '../theme';
 import {
   generateSingleElimBracket,
   generateDoubleElimBracket,
-  generateRoundRobinSchedule,
   generateSeededBracketFromStandings,
   computeStandings,
   initMTGARecords,
@@ -25,6 +24,35 @@ import { syncRoomToFirestore, subscribeToRoom, findRoomByCode, signInAnonymously
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 
+// ── Bracket override helper ───────────────────────────────────────────────────
+
+/**
+ * Recursively clears a player from all downstream bracket slots starting at
+ * `fromRound`. Also clears the result of any match they appear in, and then
+ * recursively clears the winner of that match from further downstream slots.
+ */
+function clearPlayerDownstream(matches: BracketMatch[], playerId: string, fromRound: number): BracketMatch[] {
+  let updated = matches.map(m => ({ ...m, result: m.result ? { ...m.result } : undefined }));
+  for (let i = 0; i < updated.length; i++) {
+    const m = updated[i];
+    if (m.round < fromRound) continue;
+    if (m.player1Id === playerId || m.player2Id === playerId) {
+      const oldWinnerId = m.result?.winnerId;
+      updated[i] = {
+        ...m,
+        player1Id: m.player1Id === playerId ? null : m.player1Id,
+        player2Id: m.player2Id === playerId ? null : m.player2Id,
+        result: undefined,
+      };
+      // Recursively clear whoever that match's winner was (they were placed downstream)
+      if (oldWinnerId && oldWinnerId !== playerId) {
+        updated = clearPlayerDownstream(updated, oldWinnerId, m.round + 1);
+      }
+    }
+  }
+  return updated;
+}
+
 // ── History builder ───────────────────────────
 // ── Commander pod helpers ─────────────────────────────────────────────────────
 
@@ -36,7 +64,7 @@ import { v4 as uuidv4 } from 'uuid';
  *   n % 3 === 2 → two pods of 4, rest pods of 3
  */
 function generateCommanderPods(players: Player[], round: number): CommanderPod[] {
-  const shuffled = [...players].sort(() => Math.random() - 0.5);
+  const shuffled = shuffle(players);
   const n = shuffled.length;
 
   let numThrees: number;
@@ -88,23 +116,10 @@ function getCommanderAdvancingPlayers(pods: CommanderPod[]): string[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildHistoryEntry(room: DraftRoom): TournamentHistoryEntry {
+  // computeStandings now aggregates both phases for two_phase tournaments,
+  // so no additional patching is needed here.
   const standings = computeStandings(room);
-
-  // For two_phase tournaments, computeStandings only sees the phase 2 bracket.
-  // Add phase 1 (RR) wins and losses so the combined record is shown in history.
-  if (room.format === 'two_phase' && room.rrResults) {
-    const rrWins: Record<string, number> = {};
-    const rrLosses: Record<string, number> = {};
-    Object.values(room.rrResults).forEach(r => {
-      rrWins[r.winnerId] = (rrWins[r.winnerId] ?? 0) + 1;
-      rrLosses[r.loserId] = (rrLosses[r.loserId] ?? 0) + 1;
-    });
-    standings.forEach(s => {
-      s.wins += rrWins[s.playerId] ?? 0;
-      s.losses += rrLosses[s.playerId] ?? 0;
-    });
-  }
-
+  const playerMap = new Map(room.players.map(p => [p.id, p]));
   return {
     id: uuidv4(),
     roomId: room.id,
@@ -113,7 +128,7 @@ function buildHistoryEntry(room: DraftRoom): TournamentHistoryEntry {
     completedAt: Date.now(),
     playerCount: room.players.length,
     standings: standings.map(s => {
-      const player = room.players.find(p => p.id === s.playerId);
+      const player = playerMap.get(s.playerId);
       return {
         playerId: s.playerId,
         playerName: s.playerName,
@@ -144,6 +159,8 @@ interface AppState {
   avatarUrl: string;
   tournamentHistory: TournamentHistoryEntry[];
   pendingMatchupConfig: PendingMatchupConfig | null;
+  lastDeckName: string;
+  lastDeckColors: MTGColor[];
 }
 
 // ── Actions ───────────────────────────────────
@@ -157,8 +174,9 @@ type Action =
   | { type: 'DELETE_ALL_ROOMS' }
   | { type: 'UPDATE_ROOM'; room: DraftRoom }
   | { type: 'START_TOURNAMENT'; roomId: string }
-  | { type: 'LOG_ELIM_RESULT'; roomId: string; matchId: string; winnerId: string; loserId: string; winnerLife: number; loserLife: number }
+  | { type: 'LOG_ELIM_RESULT'; roomId: string; matchId: string; winnerId: string; loserId: string; winnerLife: number; loserLife: number; games?: Bo3GameResult[] }
   | { type: 'LOG_RR_RESULT'; roomId: string; result: RRResult }
+  | { type: 'LOG_BO3_GAME'; roomId: string; matchKey: string; game: Bo3GameResult }
   | { type: 'LOG_MTGA_WIN'; roomId: string; playerId: string; result: 'win' | 'loss' }
   | { type: 'RESET_MTGA'; roomId: string; playerId: string }
   | { type: 'LOG_MTGA_MATCHUP_RESULT'; roomId: string; roundNumber: number; matchupId: string; winnerId: string; loserId: string }
@@ -168,7 +186,7 @@ type Action =
   | { type: 'ADD_NOTIFICATION'; notification: AppNotification }
   | { type: 'REVERT_TO_PHASE_1'; roomId: string }
   | { type: 'LOG_COMMANDER_POD_RESULT'; roomId: string; podId: string; results: CommanderPodResult[] }
-  | { type: 'SET_DECK_INFO'; roomId: string; playerId: string; deckName: string; deckColors: MTGColor[] }
+  | { type: 'SET_DECK_INFO'; roomId: string; playerId: string; deckName: string; deckColors: MTGColor[]; isCurrentUser?: boolean }
   | { type: 'SET_PROFILE_EMOJI'; emoji: string }
   | { type: 'SET_AVATAR_URL'; url: string }
   | { type: 'COMPLETE_TOURNAMENT'; roomId: string }
@@ -176,7 +194,10 @@ type Action =
   | { type: 'ADD_BOT'; roomId: string; bot: Player }
   | { type: 'REMOVE_BOT'; roomId: string; botId: string }
   | { type: 'SET_PENDING_MATCHUP_CONFIG'; config: PendingMatchupConfig }
-  | { type: 'CLEAR_PENDING_MATCHUP_CONFIG' };
+  | { type: 'CLEAR_PENDING_MATCHUP_CONFIG' }
+  | { type: 'OVERRIDE_ELIM_RESULT'; roomId: string; matchId: string; winnerId: string; loserId: string }
+  | { type: 'OVERRIDE_MTGA_MATCHUP_RESULT'; roomId: string; roundNumber: number; matchupId: string; winnerId: string; loserId: string }
+  | { type: 'OVERRIDE_COMMANDER_POD_RESULT'; roomId: string; podId: string };
 
 // ── Reducer ───────────────────────────────────
 function appReducer(state: AppState, action: Action): AppState {
@@ -231,9 +252,10 @@ function appReducer(state: AppState, action: Action): AppState {
       if (justCompleted) {
         // Avoid duplicates on double-fire: skip if the most recent history entry
         // for this room was recorded within the last 10 seconds (same completion event).
-        const lastEntry = [...state.tournamentHistory]
-          .reverse()
-          .find(h => h.roomId === action.room.id);
+        let lastEntry: TournamentHistoryEntry | undefined;
+        for (let i = state.tournamentHistory.length - 1; i >= 0; i--) {
+          if (state.tournamentHistory[i].roomId === action.room.id) { lastEntry = state.tournamentHistory[i]; break; }
+        }
         const recentDupe = lastEntry && (Date.now() - lastEntry.completedAt < 10_000);
         const tournamentHistory = recentDupe
           ? state.tournamentHistory
@@ -320,7 +342,7 @@ function appReducer(state: AppState, action: Action): AppState {
       let completedRoom: DraftRoom | null = null;
       const rooms = state.rooms.map(r => {
         if (r.id !== action.roomId || !r.bracket) return r;
-        const bracket = advanceWinner(
+        let bracket = advanceWinner(
           r.bracket,
           action.matchId,
           action.winnerId,
@@ -328,13 +350,23 @@ function appReducer(state: AppState, action: Action): AppState {
           action.winnerLife,
           action.loserLife,
         );
+        if (action.games && action.games.length > 0) {
+          bracket = bracket.map(m =>
+            m.id === action.matchId && m.result
+              ? { ...m, result: { ...m.result, games: action.games } }
+              : m,
+          );
+        }
         // Tournament complete when no non-bye match still has both players assigned but no result
         const pending = bracket.filter(
           m => !m.isBye && m.player1Id && m.player2Id && !m.result?.winnerId,
         );
         const hasAnyResult = bracket.some(m => !!m.result?.winnerId);
         const justDone = pending.length === 0 && hasAnyResult && r.status !== 'completed';
-        const updated: DraftRoom = { ...r, bracket, status: justDone ? 'completed' : r.status };
+        // Clear any in-progress BO3 partial results for this match
+        const bo3InProgress = r.bo3InProgress ? { ...r.bo3InProgress } : {};
+        delete bo3InProgress[action.matchId];
+        const updated: DraftRoom = { ...r, bracket, status: justDone ? 'completed' : r.status, bo3InProgress };
         if (justDone) completedRoom = updated;
         return updated;
       });
@@ -350,6 +382,9 @@ function appReducer(state: AppState, action: Action): AppState {
         if (r.id !== action.roomId) return r;
         const key = action.result.gameKey || getRRKey(action.result.player1Id, action.result.player2Id);
         const rrResults = { ...(r.rrResults || {}), [key]: action.result };
+        // Clear any in-progress BO3 partial results for this match
+        const bo3InProgress = r.bo3InProgress ? { ...r.bo3InProgress } : {};
+        delete bo3InProgress[key];
         // Auto-complete pure round_robin when every scheduled game is logged
         const effectiveFmt = r.format === 'suggested' ? getSuggestedFormat(r.players.length) : r.format;
         if (effectiveFmt === 'round_robin' && r.status !== 'completed') {
@@ -357,17 +392,29 @@ function appReducer(state: AppState, action: Action): AppState {
           const gamesCount = r.settings.rrGamesCount ?? 1;
           const expectedGames = (n * (n - 1) / 2) * gamesCount;
           if (Object.keys(rrResults).length >= expectedGames) {
-            const updated: DraftRoom = { ...r, rrResults, status: 'completed' };
+            const updated: DraftRoom = { ...r, rrResults, bo3InProgress, status: 'completed' };
             completedRoom = updated;
             return updated;
           }
         }
-        return { ...r, rrResults };
+        return { ...r, rrResults, bo3InProgress };
       });
       const tournamentHistory = completedRoom
         ? [...state.tournamentHistory, buildHistoryEntry(completedRoom)]
         : state.tournamentHistory;
       return { ...state, rooms, tournamentHistory };
+    }
+
+    case 'LOG_BO3_GAME': {
+      const rooms = state.rooms.map(r => {
+        if (r.id !== action.roomId) return r;
+        const existing = r.bo3InProgress?.[action.matchKey] ?? [];
+        return {
+          ...r,
+          bo3InProgress: { ...(r.bo3InProgress ?? {}), [action.matchKey]: [...existing, action.game] },
+        };
+      });
+      return { ...state, rooms };
     }
 
     case 'LOG_MTGA_WIN': {
@@ -551,7 +598,11 @@ function appReducer(state: AppState, action: Action): AppState {
         );
         return { ...r, players };
       });
-      return { ...state, rooms };
+      // Persist the user's own deck choice so it pre-fills in future rooms
+      const lastDeckUpdate = action.isCurrentUser
+        ? { lastDeckName: action.deckName, lastDeckColors: action.deckColors }
+        : {};
+      return { ...state, rooms, ...lastDeckUpdate };
     }
 
     case 'SET_PROFILE_EMOJI':
@@ -619,6 +670,94 @@ function appReducer(state: AppState, action: Action): AppState {
     case 'CLEAR_PENDING_MATCHUP_CONFIG':
       return { ...state, pendingMatchupConfig: null };
 
+    case 'OVERRIDE_ELIM_RESULT': {
+      const rooms = state.rooms.map(r => {
+        if (r.id !== action.roomId || !r.bracket) return r;
+        const targetMatch = r.bracket.find(m => m.id === action.matchId);
+        if (!targetMatch) return r;
+        const oldWinnerId = targetMatch.result?.winnerId;
+
+        // Clear old winner from all downstream matches
+        let bracket = oldWinnerId
+          ? clearPlayerDownstream(r.bracket, oldWinnerId, targetMatch.round + 1)
+          : r.bracket.map(m => ({ ...m, result: m.result ? { ...m.result } : undefined }));
+
+        // Clear the target match's own result before re-applying
+        bracket = bracket.map(m => m.id === action.matchId ? { ...m, result: undefined } : m);
+
+        // Apply the new result (advances new winner to next round)
+        bracket = advanceWinner(bracket, action.matchId, action.winnerId, action.loserId, 0, 0);
+
+        // Recheck completion
+        const pending = bracket.filter(
+          m => !m.isBye && m.player1Id && m.player2Id && !m.result?.winnerId,
+        );
+        const hasAnyResult = bracket.some(m => !!m.result?.winnerId);
+        const isDone = pending.length === 0 && hasAnyResult;
+
+        return { ...r, bracket, status: isDone ? 'completed' as const : 'in_progress' as const };
+      });
+      return { ...state, rooms };
+    }
+
+    case 'OVERRIDE_MTGA_MATCHUP_RESULT': {
+      const rooms = state.rooms.map(r => {
+        if (r.id !== action.roomId || !r.mtgaRounds || !r.mtgaRecords) return r;
+        const targetRound = r.mtgaRounds.find(rd => rd.roundNumber === action.roundNumber);
+        const targetMatchup = targetRound?.matchups.find(m => m.id === action.matchupId);
+        if (!targetMatchup?.winnerId) return r; // nothing logged yet — nothing to override
+
+        const oldWinnerId = targetMatchup.winnerId;
+        const oldLoserId = targetMatchup.loserId;
+
+        // Update the matchup record
+        const updatedRounds = r.mtgaRounds.map(round => {
+          if (round.roundNumber !== action.roundNumber) return round;
+          const matchups = round.matchups.map(m =>
+            m.id === action.matchupId
+              ? { ...m, winnerId: action.winnerId, loserId: action.loserId, completedAt: Date.now() }
+              : m,
+          );
+          return { ...round, matchups };
+        });
+
+        // Revert old win/loss and apply new win/loss
+        const updatedRecords = r.mtgaRecords.map(rec => {
+          let { wins, losses } = rec;
+          if (rec.playerId === oldWinnerId) wins = Math.max(0, wins - 1);
+          if (oldLoserId && rec.playerId === oldLoserId) losses = Math.max(0, losses - 1);
+          if (rec.playerId === action.winnerId) wins += 1;
+          if (rec.playerId === action.loserId) losses += 1;
+          const active = wins < 7 && losses < 3;
+          return { ...rec, wins, losses, active };
+        });
+
+        return { ...r, mtgaRounds: updatedRounds, mtgaRecords: updatedRecords };
+      });
+      return { ...state, rooms };
+    }
+
+    case 'OVERRIDE_COMMANDER_POD_RESULT': {
+      const rooms = state.rooms.map(r => {
+        if (r.id !== action.roomId || !r.commanderPods) return r;
+        const targetPod = r.commanderPods.find(p => p.id === action.podId);
+        if (!targetPod?.results) return r;
+
+        const nextRoundPods = r.commanderPods.filter(p => p.round === targetPod.round + 1);
+        // Block override if next-round pods have already been played
+        if (nextRoundPods.some(p => !!p.results)) return r;
+
+        // Clear this pod's results and remove any unplayed next-round pods
+        const commanderPods = r.commanderPods
+          .filter(p => p.round !== targetPod.round + 1)
+          .map(p => p.id === action.podId ? { ...p, results: undefined } : p);
+
+        const status = r.status === 'completed' ? 'in_progress' as const : r.status;
+        return { ...r, commanderPods, status };
+      });
+      return { ...state, rooms };
+    }
+
     default:
       return state;
   }
@@ -636,6 +775,8 @@ const initialState: AppState = {
   avatarUrl: '',
   tournamentHistory: [],
   pendingMatchupConfig: null,
+  lastDeckName: '',
+  lastDeckColors: [],
 };
 
 // ── Context ───────────────────────────────────
@@ -645,8 +786,8 @@ interface AppContextValue {
   activeRoom: DraftRoom | null;
 
   // Convenience actions
-  createRoom: (name: string, format: FormatId, maxPlayers: number, rrGamesCount?: number, phase1Mode?: 'round_robin' | 'fixed_games') => DraftRoom;
-  joinRoomByCode: (code: string) => Promise<{ status: 'ok'; roomId: string } | { status: 'not_found' | 'full' | 'already_joined' }>;
+  createRoom: (name: string, format: FormatId, maxPlayers: number, rrGamesCount?: number, phase1Mode?: 'round_robin' | 'fixed_games', setName?: string, roundDuration?: number) => DraftRoom;
+  joinRoomByCode: (code: string) => Promise<{ status: 'ok'; roomId: string; asSpectator: boolean } | { status: 'not_found' | 'full' | 'already_joined' | 'ended' }>;
   setUserName: (name: string) => void;
   setProfileEmoji: (emoji: string) => void;
   setAvatarUrl: (url: string) => void;
@@ -659,6 +800,12 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 // ── Provider ──────────────────────────────────
 const STORAGE_KEY = '@mtgdraftforge_state_v2';
+
+const BOT_NAMES = [
+  'Jace', 'Liliana', 'Chandra', 'Garruk', 'Ajani',
+  'Nissa', 'Sorin', 'Gideon', 'Teferi', 'Karn',
+  'Elspeth', 'Tamiyo', 'Venser', 'Nahiri', 'Ugin',
+];
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, initialState);
@@ -708,6 +855,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       profileEmoji: state.profileEmoji,
       avatarUrl: state.avatarUrl,
       tournamentHistory: state.tournamentHistory,
+      lastDeckName: state.lastDeckName,
+      lastDeckColors: state.lastDeckColors,
     };
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
   }, [state]);
@@ -753,7 +902,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const activeRoom = state.rooms.find(r => r.id === state.activeRoomId) ?? null;
 
-  const createRoom = useCallback((name: string, format: FormatId, maxPlayers: number, rrGamesCount?: number, phase1Mode?: 'round_robin' | 'fixed_games'): DraftRoom => {
+  const createRoom = useCallback((name: string, format: FormatId, maxPlayers: number, rrGamesCount?: number, phase1Mode?: 'round_robin' | 'fixed_games', setName?: string, roundDuration?: number): DraftRoom => {
     const player: Player = {
       id: state.currentUserId,
       name: state.currentUserName || 'Host',
@@ -764,6 +913,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       id: uuidv4(),
       inviteCode: generateInviteCode(),
       name,
+      setName: setName || undefined,
       ownerId: state.currentUserId,
       format,
       maxPlayers,
@@ -780,15 +930,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         tiebreakerByLife: true,
         rrGamesCount: rrGamesCount ?? 1,
         phase1Mode: phase1Mode ?? 'round_robin',
+        roundDuration: roundDuration ?? 0,
+        bestOf3: false,
       },
     };
     dispatch({ type: 'CREATE_ROOM', room });
     return room;
-  }, [state.currentUserId, state.currentUserName]);
+  }, [state.currentUserId, state.currentUserName, state.avatarUrl]);
 
   const joinRoomByCode = useCallback(async (
     code: string,
-  ): Promise<{ status: 'ok'; roomId: string } | { status: 'not_found' | 'full' | 'already_joined' }> => {
+  ): Promise<{ status: 'ok'; roomId: string; asSpectator: boolean } | { status: 'not_found' | 'full' | 'already_joined' | 'ended' }> => {
     const trimmed = code.trim().toUpperCase();
 
     // 1. Check local rooms first (fast path — same device or already synced)
@@ -801,14 +953,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       room = remote;
     }
 
-    if (room.players.length >= room.maxPlayers) return { status: 'full' };
+    // Completed rooms are closed — no new joins (player or spectator)
+    if (room.status === 'completed') return { status: 'ended' };
+
+    // Already in the room
     if (room.players.find(p => p.id === state.currentUserId)) return { status: 'already_joined' };
+
+    // Tournament in progress → join as spectator (bypasses maxPlayers cap)
+    const asSpectator = room.status === 'in_progress';
+
+    // Only enforce the player cap for real players joining a waiting room
+    if (!asSpectator && room.players.length >= room.maxPlayers) return { status: 'full' };
 
     const player: Player = {
       id: state.currentUserId,
       name: state.currentUserName || 'Player',
       joinedAt: Date.now(),
       avatarUrl: state.avatarUrl || undefined,
+      isSpectator: asSpectator || undefined,
     };
 
     // Dispatch locally (remoteRoom ensures it's added if not already in local state)
@@ -818,7 +980,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // so the host and other devices see us right away.
     syncRoomToFirestore({ ...room, players: [...room.players, player] });
 
-    return { status: 'ok', roomId: room.id };
+    return { status: 'ok', roomId: room.id, asSpectator };
   }, [state.rooms, state.currentUserId, state.currentUserName, state.avatarUrl]);
 
   const setUserName = useCallback((name: string) => {
@@ -834,11 +996,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ── Bot helpers ───────────────────────────────
-  const BOT_NAMES = [
-    'Jace', 'Liliana', 'Chandra', 'Garruk', 'Ajani',
-    'Nissa', 'Sorin', 'Gideon', 'Teferi', 'Karn',
-    'Elspeth', 'Tamiyo', 'Venser', 'Nahiri', 'Ugin',
-  ];
 
   const addBot = useCallback((roomId: string) => {
     const room = state.rooms.find(r => r.id === roomId);

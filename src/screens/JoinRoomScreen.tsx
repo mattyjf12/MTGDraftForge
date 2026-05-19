@@ -32,6 +32,7 @@ export default function JoinRoomScreen() {
         not_found: 'Room not found. Check the code and try again.',
         full: 'This room is full.',
         already_joined: 'You\'ve already joined this room.',
+        ended: 'This tournament has already ended.',
       };
       setError(messages[result.status] || 'Something went wrong.');
       return;

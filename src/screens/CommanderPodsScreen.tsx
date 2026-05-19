@@ -2,22 +2,18 @@
 // Shows Commander tournament pods for the current round.
 // The host can log each pod's placement order (1st → 4th).
 // Top-2 from every pod automatically advance to the next round.
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useRoute, RouteProp } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius } from '../theme';
-import { Button, Card, Row, Divider, Badge } from '../components/UI';
+import { Button, Card, Row, Divider, Badge, haptic } from '../components/UI';
 import { useApp } from '../services/AppContext';
 import { patchCommanderPodResult } from '../services/firebase';
 import { CommanderPod, CommanderPodResult } from '../utils/types';
 import { RoomsStackParams } from '../navigation/RootNavigator';
-import { haptic } from '../components/UI';
-
-type Nav = NativeStackNavigationProp<RoomsStackParams>;
 type RouteT = RouteProp<RoomsStackParams, 'CommanderPods'>;
 
 // ── Placement drag-and-drop (simplified: tap to cycle) ───────────────────────
@@ -31,6 +27,7 @@ function PodCard({
   currentUserId,
   isFinal,
   onLogResult,
+  onOverrideResult,
 }: {
   pod: CommanderPod;
   playerNames: Record<string, string>;
@@ -38,6 +35,7 @@ function PodCard({
   currentUserId: string;
   isFinal: boolean;
   onLogResult: (podId: string, results: CommanderPodResult[]) => void;
+  onOverrideResult?: (podId: string) => void;
 }) {
   // Local placement ordering — tapping a player cycles their placement
   const [order, setOrder] = useState<string[]>(pod.playerIds);
@@ -97,15 +95,25 @@ function PodCard({
 
       {isDone ? (
         // Show final placement
-        pod.results!.map((res, i) => (
-          <Row key={res.playerId} style={s.placementRow}>
-            <Text style={s.placementEmoji}>{PLACEMENTS[i] ?? `${i + 1}.`}</Text>
-            <Text style={[s.placementName, i < advanceCount && { color: Colors.greenLight }]}>
-              {playerNames[res.playerId] ?? res.playerId}
-            </Text>
-            {i < advanceCount && <Text style={s.advanceBadge}>ADVANCES</Text>}
-          </Row>
-        ))
+        <>
+          {pod.results!.map((res, i) => (
+            <Row key={res.playerId} style={s.placementRow}>
+              <Text style={s.placementEmoji}>{PLACEMENTS[i] ?? `${i + 1}.`}</Text>
+              <Text style={[s.placementName, i < advanceCount && { color: Colors.greenLight }]}>
+                {playerNames[res.playerId] ?? res.playerId}
+              </Text>
+              {i < advanceCount && <Text style={s.advanceBadge}>ADVANCES</Text>}
+            </Row>
+          ))}
+          {isOwner && onOverrideResult && (
+            <TouchableOpacity
+              style={s.overrideBtn}
+              onPress={() => onOverrideResult(pod.id)}
+            >
+              <Text style={s.overrideBtnText}>✏️ Override Result</Text>
+            </TouchableOpacity>
+          )}
+        </>
       ) : (
         // Drag-to-order placement UI
         <>
@@ -163,7 +171,6 @@ function PodCard({
 export default function CommanderPodsScreen() {
   const { state, dispatch } = useApp();
   const route = useRoute<RouteT>();
-  const navigation = useNavigation<Nav>();
   const { roomId } = route.params;
 
   const room = state.rooms.find(r => r.id === roomId);
@@ -177,8 +184,11 @@ export default function CommanderPodsScreen() {
   }
 
   const isOwner = room.ownerId === state.currentUserId;
-  const playerNames: Record<string, string> = {};
-  room.players.forEach(p => { playerNames[p.id] = p.name; });
+  const playerNames = useMemo(() => {
+    const names: Record<string, string> = {};
+    room.players.forEach(p => { names[p.id] = p.name; });
+    return names;
+  }, [room.players]);
 
   // Show only current round pods
   const maxRound = Math.max(...room.commanderPods.map(p => p.round));
@@ -189,6 +199,37 @@ export default function CommanderPodsScreen() {
     dispatch({ type: 'LOG_COMMANDER_POD_RESULT', roomId, podId, results });
     patchCommanderPodResult(roomId, podId, results);
     haptic('notificationSuccess');
+  }
+
+  function handleOverrideResult(podId: string) {
+    const pod = room.commanderPods!.find(p => p.id === podId);
+    if (!pod) return;
+
+    const nextRoundPods = room.commanderPods!.filter(p => p.round === pod.round + 1);
+    if (nextRoundPods.some(p => !!p.results)) {
+      Alert.alert(
+        'Cannot Override',
+        'Later rounds have already been played. Override is not available once subsequent round results are recorded.',
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Override Pod Result',
+      `This will clear the result and let you re-log it.${nextRoundPods.length > 0 ? "\n\nThe next round's pods will be removed and regenerated after you re-log." : ''}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Override',
+          style: 'destructive',
+          onPress: () => {
+            dispatch({ type: 'OVERRIDE_COMMANDER_POD_RESULT', roomId, podId });
+            haptic('impactMedium');
+          },
+        },
+      ],
+    );
   }
 
   return (
@@ -251,6 +292,7 @@ export default function CommanderPodsScreen() {
             currentUserId={state.currentUserId}
             isFinal={currentRoundPods.length === 1}
             onLogResult={handleLogResult}
+            onOverrideResult={handleOverrideResult}
           />
         ))}
 
@@ -267,10 +309,11 @@ export default function CommanderPodsScreen() {
                   key={pod.id}
                   pod={pod}
                   playerNames={playerNames}
-                  isOwner={false}
+                  isOwner={isOwner}
                   currentUserId={state.currentUserId}
                   isFinal={pods.length === 1}
                   onLogResult={() => {}}
+                  onOverrideResult={handleOverrideResult}
                 />
               ))}
             </View>
@@ -335,4 +378,15 @@ const s = StyleSheet.create({
   champEmoji: { fontSize: 48 },
   champTitle: { ...Typography.labelGold, marginTop: Spacing.sm },
   champName: { fontFamily: 'Georgia', fontSize: 26, color: Colors.gold, marginTop: 4 },
+
+  overrideBtn: {
+    marginTop: Spacing.md,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: Colors.textMuted,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+  },
+  overrideBtnText: { ...Typography.labelSM, color: Colors.textMuted, fontSize: 11 },
 });

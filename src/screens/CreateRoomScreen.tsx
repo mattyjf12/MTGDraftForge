@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, ScrollView, StyleSheet,
-  TouchableOpacity, KeyboardAvoidingView, Platform,
+  TouchableOpacity, KeyboardAvoidingView, Platform, Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -11,19 +11,32 @@ import { Colors, Typography, Spacing, Radius, FORMATS, FormatId } from '../theme
 import { Button, Label, Card, Row, Divider } from '../components/UI';
 import { useApp } from '../services/AppContext';
 import { RoomsStackParams } from '../navigation/RootNavigator';
-import { generateRoundRobinSchedule } from '../utils/tournament';
 
 type Nav = NativeStackNavigationProp<RoomsStackParams>;
 
+const FIXED_GAME_OPTIONS = [2, 3, 4, 5, 6, 7, 8];
+const ROUND_DURATION_OPTIONS = [
+  { label: 'Off', value: 0 },
+  { label: '30m', value: 30 },
+  { label: '40m', value: 40 },
+  { label: '50m', value: 50 },
+  { label: '60m', value: 60 },
+  { label: '75m', value: 75 },
+  { label: '90m', value: 90 },
+];
+
 export default function CreateRoomScreen() {
   const navigation = useNavigation<Nav>();
-  const { createRoom } = useApp();
+  const { createRoom, dispatch } = useApp();
   const [roomName, setRoomName] = useState('');
   const [format, setFormat] = useState<FormatId>('single_elim');
   const [maxPlayers, setMaxPlayers] = useState(8);
+  const [setName, setSetName] = useState('');
   const [phase1Mode, setPhase1Mode] = useState<'round_robin' | 'fixed_games'>('round_robin');
   const [rrGamesCount, setRrGamesCount] = useState(1);
   const [fixedGames, setFixedGames] = useState(3);
+  const [roundDuration, setRoundDuration] = useState(0);
+  const [bestOf3, setBestOf3] = useState(false);
   const [error, setError] = useState('');
 
   function handleCreate() {
@@ -40,7 +53,12 @@ export default function CreateRoomScreen() {
       maxPlayers,
       gamesCount,
       isTwoPhase ? phase1Mode : undefined,
+      setName.trim() || undefined,
+      roundDuration,
     );
+    if (bestOf3) {
+      dispatch({ type: 'UPDATE_ROOM', room: { ...room, settings: { ...room.settings, bestOf3: true } } });
+    }
     navigation.replace('Tournament', { roomId: room.id });
   }
 
@@ -62,7 +80,6 @@ export default function CreateRoomScreen() {
   }
 
   const playerOptions = [4, 6, 8, 10, 12, 16];
-  const fixedGameOptions = [2, 3, 4, 5, 6, 7, 8];
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -91,6 +108,19 @@ export default function CreateRoomScreen() {
             }
             <Text style={styles.charCount}>{roomName.length}/40</Text>
           </View>
+
+          <Label>Set / Expansion (optional)</Label>
+          <TextInput
+            style={[styles.input, { marginBottom: Spacing.sm }]}
+            placeholder="e.g. Bloomburrow, Duskmourn"
+            placeholderTextColor={Colors.textFaint}
+            value={setName}
+            onChangeText={setSetName}
+            autoCapitalize="words"
+            maxLength={40}
+            returnKeyType="done"
+          />
+          <Text style={[styles.inputHint, { marginBottom: Spacing.lg }]}>Displayed in the room header for reference.</Text>
 
           <Label>Max Players</Label>
           <View style={styles.playerGrid}>
@@ -200,7 +230,7 @@ export default function CreateRoomScreen() {
                     Each player plays this many games. Pairings follow round-robin rotation.
                   </Text>
                   <View style={styles.gamesGrid}>
-                    {fixedGameOptions.map(n => (
+                    {FIXED_GAME_OPTIONS.map(n => (
                       <TouchableOpacity
                         key={n}
                         style={[styles.gameOption, fixedGames === n && styles.gameOptionSelected]}
@@ -217,6 +247,37 @@ export default function CreateRoomScreen() {
               )}
             </View>
           )}
+
+          {/* Round duration */}
+          <Label style={{ marginTop: Spacing.lg }}>Round Timer</Label>
+          <Text style={styles.subDesc}>Set a countdown timer for each round. 0 = off.</Text>
+          <View style={styles.gamesGrid}>
+            {ROUND_DURATION_OPTIONS.map(opt => (
+              <TouchableOpacity
+                key={opt.value}
+                style={[styles.gameOption, roundDuration === opt.value && styles.gameOptionSelected]}
+                onPress={() => setRoundDuration(opt.value)}
+              >
+                <Text style={[styles.gameOptionText, roundDuration === opt.value && styles.gameOptionTextSelected, { fontSize: 13 }]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Best of 3 */}
+          <View style={styles.bo3Row}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.bo3Label}>Best of 3</Text>
+              <Text style={styles.bo3Desc}>Each matchup is a best-of-3 series — first to win 2 games wins the match</Text>
+            </View>
+            <Switch
+              value={bestOf3}
+              onValueChange={setBestOf3}
+              trackColor={{ false: Colors.border, true: Colors.goldDark }}
+              thumbColor={bestOf3 ? Colors.gold : Colors.textFaint}
+            />
+          </View>
 
           <Divider style={{ marginTop: Spacing.xl }} />
           <Button label="Create Room" onPress={handleCreate} size="lg" fullWidth icon="🏰" />
@@ -362,4 +423,12 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
     textAlign: 'center',
   },
+  bo3Row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    gap: Spacing.md,
+  },
+  bo3Label: { ...Typography.bodyMD, marginBottom: 2 },
+  bo3Desc: { ...Typography.bodySM, color: Colors.textMuted, lineHeight: 18 },
 });

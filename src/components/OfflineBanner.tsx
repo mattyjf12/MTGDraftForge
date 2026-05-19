@@ -2,13 +2,13 @@
 // Displays a persistent red bar at the top of the screen when the device
 // has no internet connection. Animates in/out smoothly.
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 import { Colors, Typography, Spacing } from '../theme';
 
 export default function OfflineBanner() {
-  const [isOffline, setIsOffline] = React.useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const slideAnim = useRef(new Animated.Value(-48)).current; // starts hidden above screen
 
   useEffect(() => {

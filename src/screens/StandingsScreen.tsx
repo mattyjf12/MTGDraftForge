@@ -4,7 +4,7 @@ import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, RouteProp } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius } from '../theme';
-import { Card, EmptyState, Divider, MTGColorPips } from '../components/UI';
+import { EmptyState, Divider, MTGColorPips } from '../components/UI';
 import { useApp } from '../services/AppContext';
 import { computeStandings } from '../utils/tournament';
 import { RoomsStackParams } from '../navigation/RootNavigator';
@@ -21,6 +21,7 @@ export function StandingsScreen() {
   if (!room) return <SafeAreaView style={s.safe}><EmptyState icon="❓" title="Room not found" /></SafeAreaView>;
 
   const standings = computeStandings(room);
+  const playerMap = new Map(room.players.map(p => [p.id, p]));
 
   return (
     <SafeAreaView style={s.safe} edges={['bottom']}>
@@ -36,7 +37,9 @@ export function StandingsScreen() {
         </View>
         <Divider style={{ marginBottom: 4 }} />
 
-        {standings.map((entry, i) => (
+        {standings.map((entry, i) => {
+          const player = playerMap.get(entry.playerId);
+          return (
           <View key={entry.playerId} style={[s.row, i === 0 && s.rowGold]}>
             <Text style={[s.rank, i === 0 && { color: Colors.gold }, i === 1 && { color: '#aaa' }, i === 2 && { color: Colors.goldDark }]}>
               {MEDALS[i] || `#${entry.rank}`}
@@ -46,19 +49,17 @@ export function StandingsScreen() {
                 {entry.playerName}
               </Text>
               {entry.isEliminated && <Text style={s.eliminatedTag}>eliminated</Text>}
-              {(() => {
-                const player = room.players.find(p => p.id === entry.playerId);
-                return player?.deckColors && player.deckColors.length > 0
-                  ? <MTGColorPips colors={player.deckColors} size="sm" />
-                  : null;
-              })()}
+              {player?.deckColors && player.deckColors.length > 0
+                ? <MTGColorPips colors={player.deckColors} size="sm" />
+                : null}
             </View>
             <Text style={[s.cell, { color: Colors.greenLight, width: 32 }]}>{entry.wins}</Text>
             <Text style={[s.cell, { color: Colors.redLight, width: 32 }]}>{entry.losses}</Text>
             <Text style={[s.cell, { color: Colors.textMuted, width: 40, fontSize: 11 }]}>{entry.totalFinalLife}</Text>
             <Text style={[s.cell, { color: Colors.gold, width: 44, fontWeight: '700' }]}>{entry.matchPoints}</Text>
           </View>
-        ))}
+          );
+        })}
 
         <Divider style={{ marginTop: Spacing.md }} />
         <Text style={s.legend}>W = Wins · L = Losses · LP = Life Points (tiebreaker) · PTS = Match Points (3/win)</Text>

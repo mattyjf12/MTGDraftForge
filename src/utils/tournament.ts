@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────
 // MTG Draft Forge — Tournament Logic
 // ─────────────────────────────────────────────
-import { BracketMatch, Player, RRResult, RRResultKey, StandingsEntry, DraftRoom, MTGARecord, MTGAMatchup, MTGARound, CommanderPod } from './types';
+import { BracketMatch, Player, RRResult, StandingsEntry, DraftRoom, MTGARecord, MTGAMatchup, MTGARound, CommanderPod } from './types';
 import { FormatId, getSuggestedFormat } from '../theme';
 
 // ── Helpers ───────────────────────────────────
@@ -192,7 +192,7 @@ export function generateDoubleElimBracket(players: Player[]): BracketMatch[] {
 }
 
 function maxRound(matches: BracketMatch[]): number {
-  return Math.max(...matches.map(m => m.round));
+  return matches.reduce((max, m) => Math.max(max, m.round), 0);
 }
 
 // ── Round Robin Schedule ──────────────────────
@@ -295,10 +295,11 @@ export function generateSeededBracketFromStandings(
   players: Player[],
   standings: StandingsEntry[],
 ): BracketMatch[] {
-  const seededPlayers: Player[] = players.map(p => {
-    const entry = standings.find(s => s.playerId === p.id);
-    return { ...p, seed: entry?.rank ?? players.length + 1 };
-  });
+  const standingsMap = new Map(standings.map(s => [s.playerId, s]));
+  const seededPlayers: Player[] = players.map(p => ({
+    ...p,
+    seed: standingsMap.get(p.id)?.rank ?? players.length + 1,
+  }));
   return generateSingleElimBracket(seededPlayers, true);
 }
 
@@ -433,19 +434,22 @@ export function computeStandings(room: DraftRoom): StandingsEntry[] {
     isEliminated: false,
   }));
 
+  // Pre-build a map for O(1) lookups instead of repeated .find() calls
+  const baseMap = new Map(base.map(e => [e.playerId, e]));
+
   if (effectiveFormat === 'round_robin' ||
       (effectiveFormat === 'two_phase' && room.phase !== 2)) {
     // RR standings: sum all results in rrResults (works for both single-game and multi-game keys)
     const results = room.rrResults || {};
     Object.values(results).forEach((r: RRResult) => {
-      const winner = base.find(e => e.playerId === r.winnerId);
-      const loser  = base.find(e => e.playerId === r.loserId);
+      const winner = baseMap.get(r.winnerId);
+      const loser  = baseMap.get(r.loserId);
       if (winner) { winner.wins++; winner.matchPoints += 3; winner.totalFinalLife += r.winnerFinalLife; }
       if (loser)  { loser.losses++; }
     });
   } else if (effectiveFormat === 'mtga') {
     (room.mtgaRecords || []).forEach(rec => {
-      const entry = base.find(e => e.playerId === rec.playerId);
+      const entry = baseMap.get(rec.playerId);
       if (entry) {
         entry.wins = rec.wins;
         entry.losses = rec.losses;
@@ -489,8 +493,8 @@ export function computeStandings(room: DraftRoom): StandingsEntry[] {
     // Bracket-based (single_elim, double_elim, seeded, two_phase phase 2)
     room.bracket.forEach(match => {
       if (!match.result?.winnerId || match.isBye) return;
-      const winner = base.find(e => e.playerId === match.result!.winnerId);
-      const loser  = base.find(e => e.playerId === match.result!.loserId);
+      const winner = baseMap.get(match.result!.winnerId);
+      const loser  = baseMap.get(match.result!.loserId!);
       if (winner) {
         winner.wins++;
         winner.matchPoints += 3;
@@ -501,6 +505,17 @@ export function computeStandings(room: DraftRoom): StandingsEntry[] {
         loser.isEliminated = effectiveFormat !== 'double_elim';
       }
     });
+
+    // For two_phase, also fold in the phase 1 (Round Robin) wins and losses
+    // so the displayed record is the aggregate across both phases.
+    if (effectiveFormat === 'two_phase' && room.rrResults) {
+      Object.values(room.rrResults).forEach(r => {
+        const winner = baseMap.get(r.winnerId);
+        const loser  = baseMap.get(r.loserId);
+        if (winner) { winner.wins++; winner.matchPoints += 3; winner.totalFinalLife += r.winnerFinalLife; }
+        if (loser)  { loser.losses++; }
+      });
+    }
 
     // Rank by which round each player was eliminated in.
     // Champion (never eliminated) gets Infinity → always rank 1.

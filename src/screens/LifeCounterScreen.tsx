@@ -6,10 +6,11 @@ import {
   TextInput, Animated, Alert, Modal, Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius, getSuggestedFormat } from '../theme';
 import { generateRoundRobinSchedule, generateMultiGameRRSchedule, getRRKey, MultiGameRRMatch } from '../utils/tournament';
 import { Button, Card, Row, Label, Divider, haptic } from '../components/UI';
-import { LifePlayer } from '../utils/types';
+import { LifePlayer, Bo3GameResult } from '../utils/types';
 import { useApp } from '../services/AppContext';
 import { patchBracketMatch, patchMtgaMatchupResult } from '../services/firebase';
 import 'react-native-get-random-values';
@@ -82,9 +83,11 @@ function findPendingMatchup(
   userId: string,
 ): { description: string; logAction: () => void } | null {
   if (!room || room.status !== 'in_progress') return null;
+  // Exclude spectators from all matchup logic — they are not tournament participants
+  const participantPlayers = room.players.filter(p => !p.isSpectator);
   const playerNames: Record<string, string> = {};
-  room.players.forEach(p => { playerNames[p.id] = p.name; });
-  const effectiveFmt = room.format === 'suggested' ? getSuggestedFormat(room.players.length) : room.format;
+  participantPlayers.forEach(p => { playerNames[p.id] = p.name; });
+  const effectiveFmt = room.format === 'suggested' ? getSuggestedFormat(participantPlayers.length) : room.format;
 
   // Bracket / seeded / double-elim
   if (room.bracket && (effectiveFmt === 'single_elim' || effectiveFmt === 'double_elim' || effectiveFmt === 'seeded' || (effectiveFmt === 'two_phase' && room.phase === 2))) {
@@ -106,12 +109,12 @@ function findPendingMatchup(
   // Round Robin
   if (effectiveFmt === 'round_robin') {
     const result = findEligibleRRPairing(
-      generateRoundRobinSchedule(room.players),
+      generateRoundRobinSchedule(participantPlayers),
       room.rrResults ?? {},
       userId,
     );
     if (!result) return null;
-    const opp = room.players.find(p => p.id === result.oppId);
+    const opp = participantPlayers.find(p => p.id === result.oppId);
     if (opp) return { description: `vs ${opp.name} (Round Robin)`, logAction: () => null };
     return null;
   }
@@ -119,13 +122,13 @@ function findPendingMatchup(
   // Two-phase phase 1 (multi-game RR)
   if (effectiveFmt === 'two_phase' && room.phase === 1) {
     const m = findEligibleMultiGameMatch(
-      generateMultiGameRRSchedule(room.players, room.settings?.rrGamesCount ?? 1),
+      generateMultiGameRRSchedule(participantPlayers, room.settings?.rrGamesCount ?? 1),
       room.rrResults ?? {},
       userId,
     );
     if (!m) return null;
     const oppId = m.p1id === userId ? m.p2id : m.p1id;
-    const opp = room.players.find(p => p.id === oppId);
+    const opp = participantPlayers.find(p => p.id === oppId);
     if (opp) return { description: `vs ${opp.name} (Round Robin)`, logAction: () => null };
     return null;
   }
@@ -507,6 +510,7 @@ function CommanderGridCard({
 
 export default function LifeCounterScreen() {
   const { state, dispatch } = useApp();
+  const navigation = useNavigation<any>();
   const [commanderMode, setCommanderMode] = useState(false);
   const [players, setPlayers] = useState<LifePlayer[]>([
     { id: uuidv4(), name: 'Player 1', life: DEFAULT_LIFE, startingLife: DEFAULT_LIFE, color: PLAYER_COLORS[0], poisonCounters: 0, energyCounters: 0, isEliminated: false },
@@ -517,11 +521,39 @@ export default function LifeCounterScreen() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [configuredPodId, setConfiguredPodId] = useState<string | null>(null);
-  const [configuredMatchupKey, setConfiguredMatchupKey] = useState<string | null>(null);
-  const [tableMode, setTableMode] = useState(false);
+  const [tableMode, setTableMode] = useState(true);
 
   // Track when we've already prompted for a given "game over" state
   const logPromptFiredRef = useRef(false);
+  // BO3 series: accumulates per-game results across life resets within a series
+  const bo3SeriesRef = useRef<Bo3GameResult[]>([]);
+  // Only prompt to log a result if the user actually made life adjustments
+  // in this session — prevents false triggers when room state changes in the
+  // background (e.g. owner advances to Phase 2 while the tab is mounted).
+  const gameInProgressRef = useRef(false);
+
+  // Undo history — stores up to 10 snapshots of player state
+  const undoHistoryRef = useRef<LifePlayer[][]>([]);
+  const undoToastAnim = useRef(new Animated.Value(0)).current;
+
+  function pushHistory(snapshot: LifePlayer[]) {
+    undoHistoryRef.current = [...undoHistoryRef.current.slice(-9), snapshot.map(p => ({ ...p }))];
+  }
+
+  function undo() {
+    const history = undoHistoryRef.current;
+    if (history.length === 0) return;
+    const prev = history[history.length - 1];
+    undoHistoryRef.current = history.slice(0, -1);
+    setPlayers(prev);
+    haptic('impactLight');
+    // Show toast
+    Animated.sequence([
+      Animated.timing(undoToastAnim, { toValue: 1, duration: 150, useNativeDriver: true }),
+      Animated.delay(1200),
+      Animated.timing(undoToastAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start();
+  }
 
   // ── Derive current Commander pod for this user ────────────────────────────
   const activeRoom = state.rooms.find(r => r.id === state.activeRoomId);
@@ -552,158 +584,96 @@ export default function LifeCounterScreen() {
     setStartLife(COMMANDER_LIFE);
     setPlayers(newPlayers);
     logPromptFiredRef.current = false;
+    gameInProgressRef.current = false;
+    bo3SeriesRef.current = [];
     setConfiguredPodId(currentPod.id);
-    haptic('notificationSuccess');
-  }
-
-  // ── Derive current matchup for non-commander formats ─────────────────────
-  const currentMatchup = useMemo(() => {
-    if (!activeRoom || activeRoom.status !== 'in_progress' || activeRoom.format === 'commander') return null;
-    const userId = state.currentUserId;
-    const me = activeRoom.players.find(p => p.id === userId);
-    if (!me) return null;
-    const startingLife = activeRoom.settings?.startingLife ?? DEFAULT_LIFE;
-    const fmt = activeRoom.format === 'suggested'
-      ? getSuggestedFormat(activeRoom.players.length)
-      : activeRoom.format;
-
-    // Bracket formats
-    if (fmt === 'single_elim' || fmt === 'double_elim' || fmt === 'seeded' ||
-        (fmt === 'two_phase' && activeRoom.phase === 2)) {
-      const match = activeRoom.bracket?.find(m =>
-        !m.result && !m.isBye && m.player1Id && m.player2Id &&
-        (m.player1Id === userId || m.player2Id === userId),
-      );
-      if (match) {
-        const oppId = match.player1Id === userId ? match.player2Id! : match.player1Id!;
-        const opp = activeRoom.players.find(p => p.id === oppId);
-        if (opp) return { matchPlayers: [me, opp], startingLife };
-      }
-    }
-
-    // Round Robin — suggest match when both players are free (no pending earlier round obligations)
-    if (fmt === 'round_robin') {
-      const result = findEligibleRRPairing(
-        generateRoundRobinSchedule(activeRoom.players),
-        activeRoom.rrResults ?? {},
-        userId,
-      );
-      if (!result) return null;
-      const opp = activeRoom.players.find(p => p.id === result.oppId);
-      if (opp) return { matchPlayers: [me, opp], startingLife };
-      return null;
-    }
-
-    // Two-phase phase 1 (multi-game RR)
-    if (fmt === 'two_phase' && activeRoom.phase === 1) {
-      const m = findEligibleMultiGameMatch(
-        generateMultiGameRRSchedule(activeRoom.players, activeRoom.settings?.rrGamesCount ?? 1),
-        activeRoom.rrResults ?? {},
-        userId,
-      );
-      if (!m) return null;
-      const oppId = m.p1id === userId ? m.p2id : m.p1id;
-      const opp = activeRoom.players.find(p => p.id === oppId);
-      if (opp) return { matchPlayers: [me, opp], startingLife };
-      return null;
-    }
-
-    // MTGA Swiss
-    if (fmt === 'mtga' && activeRoom.mtgaRounds) {
-      const currentRound = [...activeRoom.mtgaRounds].reverse().find(r => !r.isComplete);
-      if (currentRound) {
-        const matchup = currentRound.matchups.find(m =>
-          !m.winnerId && !m.isBye &&
-          (m.player1Id === userId || m.player2Id === userId),
-        );
-        if (matchup) {
-          const oppId = matchup.player1Id === userId ? matchup.player2Id! : matchup.player1Id!;
-          const opp = activeRoom.players.find(p => p.id === oppId);
-          if (opp) return { matchPlayers: [me, opp], startingLife };
-        }
-      }
-    }
-
-    return null;
-  }, [activeRoom, state.currentUserId]);
-
-  function configureForMatchup() {
-    if (!currentMatchup || !activeRoom) return;
-    const { matchPlayers, startingLife } = currentMatchup;
-    const newPlayers: LifePlayer[] = matchPlayers.map((p, idx) => ({
-      id: uuidv4(),
-      name: p.name,
-      life: startingLife,
-      startingLife,
-      color: PLAYER_COLORS[idx % PLAYER_COLORS.length],
-      poisonCounters: 0,
-      energyCounters: 0,
-      isEliminated: false,
-    }));
-    setCommanderMode(false);
-    setStartLife(startingLife);
-    setPlayers(newPlayers);
-    logPromptFiredRef.current = false;
-    setConfiguredMatchupKey(`${activeRoom.id}|${matchPlayers.map(p => p.id).sort().join('|')}`);
     haptic('notificationSuccess');
   }
 
   // ── Life adjustment ────────────────────────────────────────────────────────
   const adjust = useCallback((id: string, delta: number) => {
-    setPlayers(ps => ps.map(p => {
-      if (p.id !== id) return p;
-      const newLife = Math.max(0, p.life + delta);
-      return { ...p, life: newLife, isEliminated: newLife === 0 };
-    }));
+    gameInProgressRef.current = true;
+    setPlayers(ps => {
+      pushHistory(ps);
+      return ps.map(p => {
+        if (p.id !== id) return p;
+        const newLife = Math.max(0, p.life + delta);
+        return { ...p, life: newLife, isEliminated: newLife === 0 };
+      });
+    });
   }, []);
 
   const adjustPoison = useCallback((id: string, delta: number) => {
-    setPlayers(ps => ps.map(p => {
-      if (p.id !== id) return p;
-      const newPoison = Math.max(0, p.poisonCounters + delta);
-      // 10 poison counters = eliminated in Commander/normal
-      const eliminated = newPoison >= 10 ? true : p.isEliminated;
-      if (newPoison >= 10 && !p.isEliminated) haptic('notificationWarning');
-      return { ...p, poisonCounters: newPoison, isEliminated: eliminated };
-    }));
+    setPlayers(ps => {
+      pushHistory(ps);
+      return ps.map(p => {
+        if (p.id !== id) return p;
+        const newPoison = Math.max(0, p.poisonCounters + delta);
+        // 10 poison counters = eliminated in Commander/normal
+        const eliminated = newPoison >= 10 ? true : p.isEliminated;
+        if (newPoison >= 10 && !p.isEliminated) haptic('notificationWarning');
+        return { ...p, poisonCounters: newPoison, isEliminated: eliminated };
+      });
+    });
   }, []);
 
   const adjustEnergy = useCallback((id: string, delta: number) => {
-    setPlayers(ps => ps.map(p => {
-      if (p.id !== id) return p;
-      return { ...p, energyCounters: Math.max(0, p.energyCounters + delta) };
-    }));
+    setPlayers(ps => {
+      pushHistory(ps);
+      return ps.map(p => {
+        if (p.id !== id) return p;
+        return { ...p, energyCounters: Math.max(0, p.energyCounters + delta) };
+      });
+    });
   }, []);
 
   // ── Commander damage ───────────────────────────────────────────────────────
   const adjustCommanderDamage = useCallback((targetId: string, sourceId: string, delta: number) => {
-    setPlayers(ps => ps.map(p => {
-      if (p.id !== targetId) return p;
-      const prev = p.commanderDamage ?? {};
-      const newDmg = Math.max(0, (prev[sourceId] ?? 0) + delta);
-      const updatedCmdr = { ...prev, [sourceId]: newDmg };
-      // 21+ commander damage from any single source = eliminated
-      const commanderElim = Object.values(updatedCmdr).some(d => d >= COMMANDER_DAMAGE_KILL);
-      if (commanderElim && !p.isEliminated) {
-        haptic('notificationWarning');
-        // Also set life to 0 for visual clarity
-        return { ...p, commanderDamage: updatedCmdr, isEliminated: true, life: 0 };
-      }
-      return { ...p, commanderDamage: updatedCmdr };
-    }));
+    setPlayers(ps => {
+      pushHistory(ps);
+      return ps.map(p => {
+        if (p.id !== targetId) return p;
+        const prev = p.commanderDamage ?? {};
+        const newDmg = Math.max(0, (prev[sourceId] ?? 0) + delta);
+        const updatedCmdr = { ...prev, [sourceId]: newDmg };
+        // 21+ commander damage from any single source = eliminated
+        const commanderElim = Object.values(updatedCmdr).some(d => d >= COMMANDER_DAMAGE_KILL);
+        if (commanderElim && !p.isEliminated) {
+          haptic('notificationWarning');
+          // Also set life to 0 for visual clarity
+          return { ...p, commanderDamage: updatedCmdr, isEliminated: true, life: 0 };
+        }
+        return { ...p, commanderDamage: updatedCmdr };
+      });
+    });
   }, []);
+
+  // ── Invalidate game session when room phase/status changes ───────────────────
+  // If the room advances to the next phase while the life counter has a stale
+  // game state, the prompt would fire for the wrong matchup. Reset the session
+  // flag so it won't trigger until the user actually plays a new game.
+  const sessionPhaseRef = useRef<number | string | undefined>(undefined);
+  useEffect(() => {
+    const room = state.rooms.find(r => r.id === state.activeRoomId);
+    const phaseKey = `${room?.phase ?? 0}-${room?.status ?? ''}`;
+    if (sessionPhaseRef.current !== undefined && sessionPhaseRef.current !== phaseKey) {
+      gameInProgressRef.current = false;
+      logPromptFiredRef.current = false;
+    }
+    sessionPhaseRef.current = phaseKey;
+  }, [state.rooms, state.activeRoomId]);
 
   // ── Auto-prompt to log tournament match result ─────────────────────────────
   useEffect(() => {
     const alive = players.filter(p => !p.isEliminated && p.life > 0);
     const hasEliminated = players.some(p => p.isEliminated || p.life === 0);
 
-    // Reset the "already prompted" flag whenever the game is clearly ongoing
     if (alive.length !== 1 || !hasEliminated) {
       logPromptFiredRef.current = false;
       return;
     }
     if (logPromptFiredRef.current) return;
+    if (!gameInProgressRef.current) return;
 
     const activeRoom = state.rooms.find(r => r.id === state.activeRoomId);
     const matchup = findPendingMatchup(activeRoom, state.currentUserId);
@@ -711,7 +681,158 @@ export default function LifeCounterScreen() {
 
     logPromptFiredRef.current = true;
     const winner = alive[0];
+    const userId = state.currentUserId;
+    const winnerIsCurrentUser = winner.name === state.currentUserName;
+    const effectiveFmt = activeRoom!.format === 'suggested'
+      ? getSuggestedFormat(activeRoom!.players.length)
+      : activeRoom!.format;
 
+    // Compute tournament player IDs for the current format
+    function getMatchIds(): { winnerId: string; loserId: string; extra?: any } | null {
+      if (effectiveFmt === 'single_elim' || effectiveFmt === 'double_elim' || effectiveFmt === 'seeded' ||
+          (effectiveFmt === 'two_phase' && activeRoom!.phase === 2)) {
+        const match = activeRoom!.bracket?.find(m =>
+          !m.result && !m.isBye && m.player1Id && m.player2Id &&
+          (m.player1Id === userId || m.player2Id === userId),
+        );
+        if (!match) return null;
+        const wId = winnerIsCurrentUser ? userId : (match.player1Id === userId ? match.player2Id! : match.player1Id!);
+        const lId = wId === match.player1Id ? match.player2Id! : match.player1Id!;
+        return { winnerId: wId, loserId: lId, extra: { match } };
+      }
+      if (effectiveFmt === 'round_robin') {
+        const rr = findEligibleRRPairing(generateRoundRobinSchedule(activeRoom!.players), activeRoom!.rrResults ?? {}, userId);
+        if (!rr) return null;
+        const wId = winnerIsCurrentUser ? userId : rr.oppId;
+        return { winnerId: wId, loserId: wId === userId ? rr.oppId : userId, extra: { rr } };
+      }
+      if (effectiveFmt === 'two_phase' && activeRoom!.phase === 1) {
+        const m = findEligibleMultiGameMatch(generateMultiGameRRSchedule(activeRoom!.players, activeRoom!.settings?.rrGamesCount ?? 1), activeRoom!.rrResults ?? {}, userId);
+        if (!m) return null;
+        const oppId = m.p1id === userId ? m.p2id : m.p1id;
+        const wId = winnerIsCurrentUser ? userId : oppId;
+        return { winnerId: wId, loserId: wId === userId ? oppId : userId, extra: { m } };
+      }
+      if (effectiveFmt === 'mtga' && activeRoom!.mtgaRounds) {
+        const currentRound = [...activeRoom!.mtgaRounds].reverse().find(r => !r.isComplete);
+        if (!currentRound) return null;
+        const mu = currentRound.matchups.find(mu => !mu.winnerId && !mu.isBye && (mu.player1Id === userId || mu.player2Id === userId));
+        if (!mu) return null;
+        const oppId = mu.player1Id === userId ? mu.player2Id! : mu.player1Id!;
+        const wId = winnerIsCurrentUser ? userId : oppId;
+        return { winnerId: wId, loserId: wId === userId ? oppId : userId, extra: { currentRound, mu } };
+      }
+      return null;
+    }
+
+    const ids = getMatchIds();
+    if (!ids) return;
+
+    const isBo3 = activeRoom!.settings?.bestOf3 === true;
+
+    // Dispatch helper: submit result for the current format
+    function dispatchResult(wId: string, lId: string, games?: Bo3GameResult[]) {
+      if (!activeRoom) return;
+      if (effectiveFmt === 'single_elim' || effectiveFmt === 'double_elim' || effectiveFmt === 'seeded' ||
+          (effectiveFmt === 'two_phase' && activeRoom.phase === 2)) {
+        const match = ids!.extra?.match;
+        if (match) {
+          dispatch({ type: 'LOG_ELIM_RESULT', roomId: activeRoom.id, matchId: match.id, winnerId: wId, loserId: lId, winnerLife: winner.life, loserLife: 0, games });
+          patchBracketMatch(activeRoom.id, match.id, wId, lId, winner.life, 0);
+        }
+      } else if (effectiveFmt === 'round_robin') {
+        const rr = ids!.extra?.rr;
+        if (rr) dispatch({ type: 'LOG_RR_RESULT', roomId: activeRoom.id, result: { player1Id: userId, player2Id: rr.oppId, winnerId: wId, loserId: lId, winnerFinalLife: winner.life, completedAt: Date.now(), games } });
+      } else if (effectiveFmt === 'two_phase' && activeRoom.phase === 1) {
+        const m = ids!.extra?.m;
+        if (m) dispatch({ type: 'LOG_RR_RESULT', roomId: activeRoom.id, result: { player1Id: userId, player2Id: m.p1id === userId ? m.p2id : m.p1id, winnerId: wId, loserId: lId, winnerFinalLife: winner.life, gameKey: m.gameKey, completedAt: Date.now(), games } });
+      } else if (effectiveFmt === 'mtga' && activeRoom.mtgaRounds) {
+        const { currentRound, mu } = ids!.extra ?? {};
+        if (currentRound && mu) {
+          dispatch({ type: 'LOG_MTGA_MATCHUP_RESULT', roomId: activeRoom.id, roundNumber: currentRound.roundNumber, matchupId: mu.id, winnerId: wId, loserId: lId });
+          patchMtgaMatchupResult(activeRoom.id, currentRound.roundNumber, mu.id, wId, lId);
+        }
+      }
+    }
+
+    if (isBo3) {
+      // ── BO3 series ──────────────────────────────────────────────────────────
+      const newGame: Bo3GameResult = { winnerId: ids.winnerId, winnerFinalLife: winner.life };
+      const series = [...bo3SeriesRef.current, newGame];
+      const scores: Record<string, number> = {};
+      series.forEach(g => { scores[g.winnerId] = (scores[g.winnerId] || 0) + 1; });
+      const seriesWinnerEntry = Object.entries(scores).find(([, w]) => w >= 2);
+
+      // Derive a stable match key so we can persist partial results to room state
+      function getMatchKey(): string | null {
+        if (effectiveFmt === 'single_elim' || effectiveFmt === 'double_elim' || effectiveFmt === 'seeded' ||
+            (effectiveFmt === 'two_phase' && activeRoom!.phase === 2)) {
+          return ids!.extra?.match?.id ?? null;
+        }
+        if (effectiveFmt === 'round_robin') {
+          const rr = ids!.extra?.rr;
+          return rr ? getRRKey(rr.p1id, rr.p2id) : null;
+        }
+        if (effectiveFmt === 'two_phase' && activeRoom!.phase === 1) {
+          return ids!.extra?.m?.gameKey ?? null;
+        }
+        return null;
+      }
+
+      if (!seriesWinnerEntry) {
+        // Series continues — persist this game then prompt to start the next
+        bo3SeriesRef.current = series;
+        const matchKey = getMatchKey();
+        if (matchKey && activeRoom) {
+          dispatch({ type: 'LOG_BO3_GAME', roomId: activeRoom.id, matchKey, game: newGame });
+        }
+        const gameNum = series.length;
+        const myScore = scores[ids.winnerId] ?? 0;
+        const oppScore = scores[ids.loserId] ?? 0;
+        haptic('notificationSuccess');
+        Alert.alert(
+          `Game ${gameNum} Complete`,
+          `${winner.name} wins!\nScore: ${myScore}–${oppScore}\n\nStart Game ${gameNum + 1}?`,
+          [
+            { text: 'Not Now', style: 'cancel' },
+            {
+              text: `▶ Game ${gameNum + 1}`,
+              onPress: () => {
+                setPlayers(ps => ps.map(p => ({ ...p, life: startLife, startingLife: startLife, isEliminated: false })));
+                undoHistoryRef.current = [];
+                logPromptFiredRef.current = false;
+                gameInProgressRef.current = false;
+              },
+            },
+          ],
+        );
+      } else {
+        // Series over — dispatch full match result
+        const [seriesWinnerId] = seriesWinnerEntry;
+        const seriesLoserId = seriesWinnerId === ids.winnerId ? ids.loserId : ids.winnerId;
+        const totalWins = scores[seriesWinnerId];
+        const totalLosses = series.length - totalWins;
+        bo3SeriesRef.current = [];
+        haptic('notificationSuccess');
+        Alert.alert(
+          '🏆 Match Complete',
+          `${winnerIsCurrentUser && seriesWinnerId === userId ? 'You win' : winner.name + ' wins'} ${totalWins}–${totalLosses}!\n\nLog match result?`,
+          [
+            { text: 'Not Now', style: 'cancel' },
+            {
+              text: 'Log Result',
+              onPress: () => {
+                dispatchResult(seriesWinnerId, seriesLoserId, series);
+                navigation.navigate('Rooms');
+              },
+            },
+          ],
+        );
+      }
+      return;
+    }
+
+    // ── Single game (non-BO3) ───────────────────────────────────────────────
     haptic('notificationSuccess');
     Alert.alert(
       '🏆 Log Match Result?',
@@ -721,108 +842,13 @@ export default function LifeCounterScreen() {
         {
           text: 'Log Result',
           onPress: () => {
-            if (!activeRoom) return;
-            const userId = state.currentUserId;
-            const winnerIsCurrentUser = winner.name === state.currentUserName;
-            const effectiveFmt = activeRoom.format === 'suggested'
-              ? getSuggestedFormat(activeRoom.players.length)
-              : activeRoom.format;
-
-            if (effectiveFmt === 'single_elim' || effectiveFmt === 'double_elim' || effectiveFmt === 'seeded' ||
-                (effectiveFmt === 'two_phase' && activeRoom.phase === 2)) {
-              const match = activeRoom.bracket?.find(m =>
-                !m.result && !m.isBye && m.player1Id && m.player2Id &&
-                (m.player1Id === userId || m.player2Id === userId),
-              );
-              if (match) {
-                const winnerId = winnerIsCurrentUser ? userId : (match.player1Id === userId ? match.player2Id! : match.player1Id!);
-                const loserId = winnerId === match.player1Id ? match.player2Id! : match.player1Id!;
-                dispatch({
-                  type: 'LOG_ELIM_RESULT',
-                  roomId: activeRoom.id,
-                  matchId: match.id,
-                  winnerId,
-                  loserId,
-                  winnerLife: winner.life,
-                  loserLife: 0,
-                });
-                patchBracketMatch(activeRoom.id, match.id, winnerId, loserId, winner.life, 0);
-              }
-            } else if (effectiveFmt === 'round_robin') {
-              const result = findEligibleRRPairing(
-                generateRoundRobinSchedule(activeRoom.players),
-                activeRoom.rrResults ?? {},
-                userId,
-              );
-              if (result) {
-                const { oppId } = result;
-                const winnerId = winnerIsCurrentUser ? userId : oppId;
-                const loserId = winnerId === userId ? oppId : userId;
-                dispatch({
-                  type: 'LOG_RR_RESULT',
-                  roomId: activeRoom.id,
-                  result: {
-                    player1Id: userId,
-                    player2Id: oppId,
-                    winnerId,
-                    loserId,
-                    winnerFinalLife: winner.life,
-                    completedAt: Date.now(),
-                  },
-                });
-              }
-            } else if (effectiveFmt === 'two_phase' && activeRoom.phase === 1) {
-              const m = findEligibleMultiGameMatch(
-                generateMultiGameRRSchedule(activeRoom.players, activeRoom.settings?.rrGamesCount ?? 1),
-                activeRoom.rrResults ?? {},
-                userId,
-              );
-              if (m) {
-                const oppId = m.p1id === userId ? m.p2id : m.p1id;
-                const winnerId = winnerIsCurrentUser ? userId : oppId;
-                const loserId = winnerId === userId ? oppId : userId;
-                dispatch({
-                  type: 'LOG_RR_RESULT',
-                  roomId: activeRoom.id,
-                  result: {
-                    player1Id: userId,
-                    player2Id: oppId,
-                    winnerId,
-                    loserId,
-                    winnerFinalLife: winner.life,
-                    gameKey: m.gameKey,
-                    completedAt: Date.now(),
-                  },
-                });
-              }
-            } else if (effectiveFmt === 'mtga' && activeRoom.mtgaRounds) {
-              const currentRound = [...activeRoom.mtgaRounds].reverse().find(r => !r.isComplete);
-              if (currentRound) {
-                const matchup = currentRound.matchups.find(m =>
-                  !m.winnerId && !m.isBye &&
-                  (m.player1Id === userId || m.player2Id === userId),
-                );
-                if (matchup) {
-                  const oppId = matchup.player1Id === userId ? matchup.player2Id! : matchup.player1Id!;
-                  const winnerId = winnerIsCurrentUser ? userId : oppId!;
-                  const loserId = winnerId === userId ? oppId! : userId;
-                  dispatch({
-                    type: 'LOG_MTGA_MATCHUP_RESULT',
-                    roomId: activeRoom.id,
-                    roundNumber: currentRound.roundNumber,
-                    matchupId: matchup.id,
-                    winnerId,
-                    loserId,
-                  });
-                  patchMtgaMatchupResult(activeRoom.id, currentRound.roundNumber, matchup.id, winnerId, loserId);
-                }
-              }
-            }
+            dispatchResult(ids.winnerId, ids.loserId);
+            navigation.navigate('Rooms');
           },
         },
       ],
     );
-  }, [players, state.activeRoomId, state.rooms, state.currentUserId, state.currentUserName, dispatch]);
+  }, [players, state.activeRoomId, state.rooms, state.currentUserId, state.currentUserName, dispatch, navigation, startLife]);
 
   // ── Apply matchup config pushed from Schedule screen ─────────────────────
   useEffect(() => {
@@ -842,6 +868,8 @@ export default function LifeCounterScreen() {
     setStartLife(cfg.startingLife);
     setPlayers(newPlayers);
     logPromptFiredRef.current = false;
+    gameInProgressRef.current = false;
+    bo3SeriesRef.current = [];
     dispatch({ type: 'CLEAR_PENDING_MATCHUP_CONFIG' });
     haptic('notificationSuccess');
   }, [state.pendingMatchupConfig]);
@@ -891,6 +919,8 @@ export default function LifeCounterScreen() {
         text: 'Reset',
         onPress: () => {
           logPromptFiredRef.current = false;
+          gameInProgressRef.current = false;
+          bo3SeriesRef.current = [];
           setPlayers(ps => ps.map(p => ({
             ...p,
             life: startLife,
@@ -912,6 +942,12 @@ export default function LifeCounterScreen() {
         <View style={s.topBarActions}>
           <TouchableOpacity style={s.topBarBtn} onPress={() => setCompact(c => !c)}>
             <Text style={s.topBarBtnText}>{compact ? '⊞' : '⊟'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.topBarBtn, undoHistoryRef.current.length === 0 && { opacity: 0.35 }]}
+            onPress={undo}
+          >
+            <Text style={s.topBarBtnText}>⎌</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.topBarBtn} onPress={() => setSettingsOpen(true)}>
             <Text style={s.topBarBtnText}>⚙️</Text>
@@ -972,7 +1008,7 @@ export default function LifeCounterScreen() {
         <ScrollView contentContainerStyle={[s.container, compact && s.containerCompact]}>
           {compact ? (
             <View style={s.compactGrid}>
-              {players.map((p, idx) => (
+              {players.slice().reverse().map((p, idx) => (
                 <LifeCard
                   key={p.id}
                   player={p}
@@ -989,7 +1025,7 @@ export default function LifeCounterScreen() {
               ))}
             </View>
           ) : (
-            players.map((p, idx) => (
+            players.slice().reverse().map((p, idx) => (
               <LifeCard
                 key={p.id}
                 player={p}
@@ -1048,7 +1084,7 @@ export default function LifeCounterScreen() {
 
             <Label style={{ marginTop: Spacing.sm }}>Starting Life</Label>
             <View style={s.lifeOptions}>
-              {(commanderMode ? [20, 30, 40, 50] : [20, 30, 40, 50]).map(n => (
+              {[20, 30, 40, 50].map(n => (
                 <Button
                   key={n}
                   label={`${n}`}
@@ -1098,6 +1134,14 @@ export default function LifeCounterScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Undo toast */}
+      <Animated.View
+        style={[s.undoToast, { opacity: undoToastAnim, transform: [{ translateY: undoToastAnim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] }]}
+        pointerEvents="none"
+      >
+        <Text style={s.undoToastText}>⎌ Life change undone</Text>
+      </Animated.View>
     </SafeAreaView>
   );
 }
@@ -1123,6 +1167,19 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   topBarBtnText: { fontSize: 16, color: Colors.textMuted },
+  undoToast: {
+    position: 'absolute',
+    bottom: 32,
+    alignSelf: 'center',
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
+    borderColor: Colors.borderGold,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 8,
+    zIndex: 100,
+  },
+  undoToastText: { ...Typography.bodyMD, color: Colors.gold },
 
   commanderBanner: {
     backgroundColor: Colors.redGlow,
@@ -1156,15 +1213,6 @@ const s = StyleSheet.create({
     color: Colors.textMuted,
     marginTop: 2,
     textAlign: 'center',
-  },
-
-  matchupSetupBanner: {
-    backgroundColor: Colors.bgCard,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.blueLight,
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.lg,
-    alignItems: 'center',
   },
 
   commanderGrid: {

@@ -328,6 +328,7 @@ export async function patchMtgaMatchupResult(
   }
 }
 
+
 /**
  * Look up a room by its 6-character invite code.
  * Used by the join flow on devices that don't have the room locally.

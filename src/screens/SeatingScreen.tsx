@@ -1,9 +1,9 @@
 // SeatingScreen.tsx
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, RouteProp } from '@react-navigation/native';
-import Svg, { Circle, Text as SvgText, Line } from 'react-native-svg';
+import Svg, { Circle, Text as SvgText } from 'react-native-svg';
 import { Colors, Typography, Spacing, Radius } from '../theme';
 import { Button, Card, EmptyState, Divider } from '../components/UI';
 import { useApp } from '../services/AppContext';
@@ -25,6 +25,24 @@ export default function SeatingScreen() {
   const seats = room.seating?.seats || [];
   const n = seats.length;
   const cx = 160, cy = 160, r = 110;
+
+  // Snake draft order: rounds 1,3,5… go 1→N; rounds 2,4,6… go N→1
+  // For a typical 3-pack draft with N players there are N*3 picks total
+  const snakeDraft = useMemo(() => {
+    if (n === 0) return [];
+    const PACKS = 3;
+    const picks: { pick: number; seat: number; pack: number; direction: string }[] = [];
+    let pick = 1;
+    for (let pack = 1; pack <= PACKS; pack++) {
+      const forward = pack % 2 === 1; // odd packs left→right, even right→left
+      const order = forward ? [...Array(n).keys()] : [...Array(n).keys()].reverse();
+      for (const idx of order) {
+        picks.push({ pick, seat: idx + 1, pack, direction: forward ? '→' : '←' });
+        pick++;
+      }
+    }
+    return picks;
+  }, [n]);
 
   return (
     <SafeAreaView style={s.safe} edges={['bottom']}>
@@ -98,6 +116,35 @@ export default function SeatingScreen() {
               <Divider />
               <Text style={s.hint}>Packs pass clockwise (Seat 1 → 2 → 3 → … → {n} → 1)</Text>
             </Card>
+
+            {/* Snake draft pick order */}
+            <Card>
+              <Text style={s.sectionTitle}>🐍 Pick Order (3-Pack Snake)</Text>
+              <Text style={[s.hint, { marginBottom: Spacing.sm }]} numberOfLines={2}>
+                Odd packs pass left (→), even packs pass right (←). Each row = one pick.
+              </Text>
+              {[1, 2, 3].map(pack => {
+                const packPicks = snakeDraft.filter(p => p.pack === pack);
+                const direction = pack % 2 === 1 ? '→' : '←';
+                return (
+                  <View key={pack} style={s.packSection}>
+                    <Text style={s.packLabel}>Pack {pack} {direction}</Text>
+                    <View style={s.pickGrid}>
+                      {packPicks.map(({ pick, seat }) => {
+                        const player = room.players.find(p => p.id === seats[seat - 1]);
+                        return (
+                          <View key={pick} style={s.pickCell}>
+                            <Text style={s.pickNum}>#{pick}</Text>
+                            <Text style={s.pickSeat}>Seat {seat}</Text>
+                            <Text style={s.pickName} numberOfLines={1}>{player?.name ?? '?'}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                );
+              })}
+            </Card>
           </>
         )}
       </ScrollView>
@@ -136,4 +183,19 @@ const s = StyleSheet.create({
   },
   firstTagText: { ...Typography.labelGold, fontSize: 9 },
   hint: { ...Typography.bodySM, color: Colors.textFaint, textAlign: 'center', marginTop: 4 },
+  packSection: { marginBottom: Spacing.md },
+  packLabel: { ...Typography.label, color: Colors.gold, marginBottom: Spacing.xs },
+  pickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs },
+  pickCell: {
+    width: 70,
+    backgroundColor: Colors.bgSurface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.sm,
+    padding: 6,
+    alignItems: 'center',
+  },
+  pickNum: { fontFamily: 'Georgia', fontSize: 15, color: Colors.gold },
+  pickSeat: { ...Typography.labelSM, color: Colors.textFaint, marginTop: 1 },
+  pickName: { ...Typography.bodySM, color: Colors.textMuted, marginTop: 2 },
 });

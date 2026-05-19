@@ -6,7 +6,7 @@ import React, { useRef, useState } from 'react';
 import {
   View, Text, TextInput, StyleSheet, ScrollView, TouchableOpacity,
   Dimensions, Animated, KeyboardAvoidingView, Platform,
-  TouchableWithoutFeedback, Keyboard,
+  TouchableWithoutFeedback, Keyboard, NativeSyntheticEvent, NativeScrollEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Typography, Spacing, Radius } from '../theme';
@@ -69,7 +69,7 @@ const SLIDES = [
 
 // ─── Slide component ──────────────────────────────────────────────────────────
 
-function Slide({ slide, isLast }: { slide: typeof SLIDES[0]; isLast: boolean }) {
+function Slide({ slide }: { slide: typeof SLIDES[0] }) {
   return (
     <View style={[styles.slide, { width: W }]}>
       <View style={styles.slideInner}>
@@ -112,7 +112,7 @@ function NameSlide({ onDone }: { onDone: (name: string) => void }) {
     const trimmed = name.trim();
     if (!trimmed) { setError('Enter your name to continue.'); return; }
     if (trimmed.length < 2) { setError('Name must be at least 2 characters.'); return; }
-    haptic('notificationSuccess');
+    haptic('impactMedium');
     onDone(trimmed);
   }
 
@@ -194,7 +194,7 @@ export default function OnboardingScreen() {
     haptic('impactLight');
   }
 
-  function handleScroll(e: any) {
+  function handleScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
     const page = Math.round(e.nativeEvent.contentOffset.x / W);
     if (page !== currentPage) {
       dotAnim.forEach((anim, i) => {
@@ -236,7 +236,7 @@ export default function OnboardingScreen() {
         style={{ flex: 1 }}
       >
         {SLIDES.map((slide, i) => (
-          <Slide key={slide.key} slide={slide} isLast={i === SLIDES.length - 1} />
+          <Slide key={slide.key} slide={slide} />
         ))}
         <NameSlide onDone={setUserName} />
       </ScrollView>
@@ -246,7 +246,7 @@ export default function OnboardingScreen() {
         {/* Dots */}
         <View style={styles.dots}>
           {Array.from({ length: ALL_STEPS }).map((_, i) => {
-            const dotWidth = dotAnim[i]?.interpolate({
+            const dotWidth = dotAnim[i].interpolate({
               inputRange: [0, 1],
               outputRange: [8, 24],
             }) ?? 8;

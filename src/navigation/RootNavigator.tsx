@@ -155,7 +155,6 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.borderGold,
     borderTopWidth: 1,
     paddingBottom: 6,
-    height: 62,
   },
   tabLabel: {
     fontFamily: 'System',

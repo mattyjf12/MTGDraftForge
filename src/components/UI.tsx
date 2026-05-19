@@ -4,7 +4,7 @@
 import React, { useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
-  ViewStyle, TextStyle, Animated, Pressable, Image, Share, Platform,
+  ViewStyle, TextStyle, Animated, Pressable, Image, Share,
 } from 'react-native';
 import { Colors, Spacing, Radius, Typography } from '../theme';
 import { MTGColor } from '../utils/types';
@@ -17,7 +17,7 @@ import ReactNativeHapticFeedback from 'react-native-haptic-feedback';
  *  'notificationSuccess' – tournament start, join success
  *  'notificationError'   – validation errors
  */
-export function haptic(type: 'impactLight' | 'impactMedium' | 'impactHeavy' | 'notificationSuccess' | 'notificationError' | 'selection' = 'impactMedium') {
+export function haptic(type: 'impactLight' | 'impactMedium' | 'impactHeavy' | 'notificationSuccess' | 'notificationWarning' | 'notificationError' | 'selection' = 'impactMedium') {
   ReactNativeHapticFeedback.trigger(type, { enableVibrateFallback: true, ignoreAndroidSystemSettings: false });
 }
 
@@ -189,8 +189,6 @@ export function Row({ children, style, between, center }: RowProps) {
 
 // ── Invite code display ───────────────────────
 export function InviteCodeBox({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false);
-
   async function handleShare() {
     haptic('impactLight');
     try {
@@ -282,7 +280,6 @@ const pipStyles = StyleSheet.create({
   label: { fontFamily: 'System', fontWeight: '700' },
 });
 
-// ── Pip (MTGA win/loss indicator) ─────────────
 // ── PlayerAvatar ──────────────────────────────
 const AVATAR_SIZE = { xs: 24, sm: 32, md: 48, lg: 80 } as const;
 type AvatarSize = keyof typeof AVATAR_SIZE;
@@ -316,16 +313,6 @@ export function PlayerAvatar({ avatarUrl, emoji = '🧙', size = 'md', style }: 
     }, style]}>
       <Text style={{ fontSize: px * 0.55 }}>{emoji}</Text>
     </View>
-  );
-}
-
-export function Pip({ filled, type }: { filled: boolean; type: 'win' | 'loss' | 'empty' }) {
-  const color = type === 'win' ? Colors.greenLight : type === 'loss' ? Colors.redLight : Colors.border;
-  const bg = filled
-    ? type === 'win' ? 'rgba(78,202,127,0.25)' : type === 'loss' ? 'rgba(224,108,90,0.25)' : 'transparent'
-    : 'transparent';
-  return (
-    <View style={[styles.pip, { borderColor: color, backgroundColor: bg }]} />
   );
 }
 
@@ -437,11 +424,5 @@ const styles = StyleSheet.create({
     ...Typography.bodySM,
     color: Colors.textMuted,
     marginTop: 2,
-  },
-  pip: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 2,
   },
 });

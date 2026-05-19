@@ -112,24 +112,6 @@ export default function RoomsListScreen() {
     );
   }
 
-  function deleteAllRooms() {
-    if (state.rooms.length === 0) return;
-    Alert.alert(
-      'Delete All Rooms',
-      `This will permanently delete all ${state.rooms.length} room${state.rooms.length !== 1 ? 's' : ''}. This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete All', style: 'destructive',
-          onPress: () => {
-            state.rooms.forEach(r => deleteRoomFromFirestore(r.id));
-            dispatch({ type: 'DELETE_ALL_ROOMS' });
-          },
-        },
-      ]
-    );
-  }
-
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       {/* Action buttons */}
@@ -275,13 +257,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   deleteBtnText: { color: Colors.redLight, fontSize: 14 },
-  deleteAllBtn: {
-    alignSelf: 'center',
-    marginBottom: Spacing.sm,
-    paddingVertical: Spacing.xs,
-    paddingHorizontal: Spacing.lg,
-  },
-  deleteAllText: { ...Typography.bodySM, color: Colors.redLight, letterSpacing: 0.5 },
   matchBanner: {
     marginHorizontal: Spacing.lg,
     marginTop: -Spacing.xs,

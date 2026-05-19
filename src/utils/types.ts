@@ -17,6 +17,13 @@ export interface Player {
   deckColors?: MTGColor[];
   avatarUrl?: string;     // URL to player's profile image
   isBot?: boolean;        // True for CPU/filler bots added by the host
+  isSpectator?: boolean;  // True when user joins after tournament has started
+}
+
+// ── Best-of-3 individual game result ─────────
+export interface Bo3GameResult {
+  winnerId: string;
+  winnerFinalLife: number;
 }
 
 // ── Match result ──────────────────────────────
@@ -26,6 +33,7 @@ export interface MatchResult {
   winnerFinalLife: number;
   loserFinalLife: number;
   completedAt: number;
+  games?: Bo3GameResult[];  // individual game results when bestOf3 is enabled
 }
 
 // ── Bracket match ─────────────────────────────
@@ -50,6 +58,7 @@ export interface RRResult {
   winnerFinalLife: number;
   completedAt: number;
   gameKey?: string;   // Unique key for this game instance (multi-game two_phase support)
+  games?: Bo3GameResult[];  // individual game results when bestOf3 is enabled
 }
 
 // ── MTGA player record ────────────────────────
@@ -109,6 +118,7 @@ export interface DraftRoom {
   id: string;
   inviteCode: string;     // 6-char uppercase code for sharing
   name: string;
+  setName?: string;       // MTG set being drafted e.g. "Bloomburrow"
   ownerId: string;        // Player ID of room creator
   format: FormatId;
   maxPlayers: number;
@@ -131,6 +141,10 @@ export interface DraftRoom {
   // Seating
   seating?: SeatingChart;
 
+  // In-progress BO3 series: partial game results keyed by matchId (elim) or gameKey (RR)
+  // Cleared when the match is fully committed via LOG_ELIM_RESULT / LOG_RR_RESULT
+  bo3InProgress?: Record<string, Bo3GameResult[]>;
+
   // Settings (owner can change before start)
   settings: RoomSettings;
 }
@@ -140,9 +154,11 @@ export interface RoomSettings {
   allowSpectators: boolean;
   requireConfirmation: boolean; // Opponent must confirm result
   tiebreakerByLife: boolean;
+  roundDuration?: number;       // Round timer in minutes (0 = off)
   // Two-Phase phase 1 seeding options:
   phase1Mode?: 'round_robin' | 'fixed_games'; // default 'round_robin'
   rrGamesCount?: number; // round_robin: full-RR cycles; fixed_games: games per player (rounds)
+  bestOf3?: boolean;    // Each matchup is a best-of-3 series (first to 2 wins)
 }
 
 // ── Life counter ──────────────────────────────

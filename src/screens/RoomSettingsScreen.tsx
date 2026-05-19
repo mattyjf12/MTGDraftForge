@@ -12,6 +12,17 @@ import { RoomsStackParams } from '../navigation/RootNavigator';
 type Route = RouteProp<RoomsStackParams, 'RoomSettings'>;
 type Nav = NativeStackNavigationProp<RoomsStackParams>;
 
+const FIXED_GAME_OPTIONS = [2, 3, 4, 5, 6, 7, 8];
+const ROUND_DURATION_OPTIONS = [
+  { label: 'Off', value: 0 },
+  { label: '30m', value: 30 },
+  { label: '40m', value: 40 },
+  { label: '50m', value: 50 },
+  { label: '60m', value: 60 },
+  { label: '75m', value: 75 },
+  { label: '90m', value: 90 },
+];
+
 function SettingRow({ label, desc, value, onToggle }: {
   label: string; desc?: string; value: boolean; onToggle: (v: boolean) => void;
 }) {
@@ -81,7 +92,6 @@ export default function RoomSettingsScreen() {
     );
   }
 
-  const fixedGameOptions = [2, 3, 4, 5, 6, 7, 8];
 
   return (
     <SafeAreaView style={s.safe} edges={['bottom']}>
@@ -171,7 +181,7 @@ export default function RoomSettingsScreen() {
                 <Label style={{ marginTop: Spacing.md }}>Rounds to Play</Label>
                 <Text style={s.settingDesc}>Each player plays this many games. Pairings follow round-robin rotation.</Text>
                 <View style={[s.lifeOptions, { flexWrap: 'wrap' }]}>
-                  {fixedGameOptions.map(n => (
+                  {FIXED_GAME_OPTIONS.map(n => (
                     <TouchableOpacity
                       key={n}
                       disabled={!canChangeSettings}
@@ -214,6 +224,25 @@ export default function RoomSettingsScreen() {
           </Card>
         )}
 
+        {/* Round timer */}
+        <Card>
+          <Label>Round Timer</Label>
+          <Text style={s.settingDesc}>Countdown timer shown to all players during the round. Set to Off to disable.</Text>
+          <View style={[s.lifeOptions, { flexWrap: 'wrap' }]}>
+            {ROUND_DURATION_OPTIONS.map(opt => (
+              <TouchableOpacity
+                key={opt.value}
+                style={[s.gameOption, { flex: 0, width: 52 }, (settings.roundDuration ?? 0) === opt.value && s.gameOptionSelected]}
+                onPress={() => setSettings(prev => ({ ...prev, roundDuration: opt.value }))}
+              >
+                <Text style={[s.gameOptionNum, { fontSize: 13 }, (settings.roundDuration ?? 0) === opt.value && { color: Colors.gold }]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </Card>
+
         {/* Toggles */}
         <Card>
           <SettingRow
@@ -235,6 +264,13 @@ export default function RoomSettingsScreen() {
             desc="Use final life total to break ties in standings"
             value={settings.tiebreakerByLife}
             onToggle={v => setSettings(prev => ({ ...prev, tiebreakerByLife: v }))}
+          />
+          <Divider style={{ marginVertical: Spacing.sm }} />
+          <SettingRow
+            label="Best of 3"
+            desc="Each matchup is a best-of-3 series — first to win 2 games wins the match"
+            value={settings.bestOf3 ?? false}
+            onToggle={v => setSettings(prev => ({ ...prev, bestOf3: v }))}
           />
         </Card>
 

@@ -29,6 +29,13 @@ const config = {
       /ios\/Pods\/.*/,
       /ios\/build\/.*/,
     ],
+    // react-native-qrcode-svg uses `qrcode` only for QRCode.create().
+    // The package's default entry (lib/server.js) eagerly requires pngjs
+    // which is a Node-only binary — it crashes in RN at import time.
+    // Alias to the pure-JS core module that exposes only `create()`.
+    extraNodeModules: {
+      qrcode: path.resolve(__dirname, 'node_modules/qrcode/lib/core/qrcode.js'),
+    },
   },
 };
 

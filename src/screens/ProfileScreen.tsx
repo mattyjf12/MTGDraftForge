@@ -1,14 +1,15 @@
 // ─────────────────────────────────────────────
 // MTG Draft Forge — Profile Screen
 // ─────────────────────────────────────────────
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  TextInput, Modal, SafeAreaView, Image, KeyboardAvoidingView, Platform,
+  TextInput, Modal, Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
 import { Colors, Spacing, Radius, Typography, FORMATS } from '../theme';
-import { Card, Row, Divider, EmptyState, Badge, SectionHeader, PlayerAvatar } from '../components/UI';
-import { MTGColorPips } from '../components/UI';
+import { Card, Row, Divider, EmptyState, Badge, SectionHeader, PlayerAvatar, MTGColorPips } from '../components/UI';
 import { useApp } from '../services/AppContext';
 
 const PROFILE_EMOJIS = [
@@ -23,13 +24,56 @@ export default function ProfileScreen() {
   const [nameInput, setNameInput] = useState(state.currentUserName);
   const [emojiModalVisible, setEmojiModalVisible] = useState(false);
   const [avatarModalVisible, setAvatarModalVisible] = useState(false);
-  const [urlInput, setUrlInput] = useState(state.avatarUrl);
-  const [urlPreviewError, setUrlPreviewError] = useState(false);
 
   // Persistent tournament history for the current user, newest first
   const history = [...state.tournamentHistory]
     .filter(h => h.standings.some(s => s.playerId === state.currentUserId))
     .sort((a, b) => b.completedAt - a.completedAt);
+
+  // ── Lifetime stats derived from history ──────────────────────────────────
+  const lifetimeStats = useMemo(() => {
+    if (history.length === 0) return null;
+
+    let totalWins = 0;
+    let totalLosses = 0;
+    let totalGames = 0;
+    let totalPlacementFraction = 0; // placement / playerCount, so 1st/8 = 0.125
+    const formatWins: Record<string, number> = {};
+    const formatGames: Record<string, number> = {};
+    const formatPlays: Record<string, number> = {};
+
+    for (const entry of history) {
+      const me = entry.standings.find(s => s.playerId === state.currentUserId);
+      if (!me) continue;
+      totalWins += me.wins;
+      totalLosses += me.losses;
+      totalGames += me.wins + me.losses;
+      totalPlacementFraction += me.rank / entry.playerCount;
+
+      const fmt = entry.format;
+      formatWins[fmt] = (formatWins[fmt] ?? 0) + me.wins;
+      formatGames[fmt] = (formatGames[fmt] ?? 0) + me.wins + me.losses;
+      formatPlays[fmt] = (formatPlays[fmt] ?? 0) + 1;
+    }
+
+    const winRate = totalGames > 0 ? Math.round((totalWins / totalGames) * 100) : 0;
+    const avgPlacement = history.length > 0
+      ? (totalPlacementFraction / history.length * 100).toFixed(0)
+      : null;
+
+    // Most played format (by tournament count)
+    const mostPlayed = Object.entries(formatPlays).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+    // Best format: highest win rate with at least 1 tournament played
+    const bestFormat = Object.entries(formatGames)
+      .filter(([, g]) => g > 0)
+      .map(([fmt, g]) => ({ fmt, wr: (formatWins[fmt] ?? 0) / g }))
+      .sort((a, b) => b.wr - a.wr)[0]?.fmt ?? null;
+
+    const fmtMeta = (id: string) => FORMATS.find(f => f.id === id);
+
+    return { totalWins, totalLosses, winRate, avgPlacement, mostPlayed, bestFormat, fmtMeta };
+  }, [history, state.currentUserId]);
 
   function saveName() {
     const trimmed = nameInput.trim();
@@ -42,19 +86,44 @@ export default function ProfileScreen() {
     setEditingName(false);
   }
 
-  function saveAvatarUrl() {
-    setAvatarUrl(urlInput.trim());
+  async function handlePickPhoto(source: 'library' | 'camera') {
     setAvatarModalVisible(false);
+    const launch = source === 'camera' ? launchCamera : launchImageLibrary;
+    const result = await launch({
+      mediaType: 'photo',
+      quality: 0.7,
+      maxWidth: 200,
+      maxHeight: 200,
+      includeBase64: true,
+    });
+
+    if (result.didCancel || result.errorCode) return;
+
+    const asset = result.assets?.[0];
+    if (!asset?.base64) {
+      Alert.alert('Could not read image', 'Please try selecting a different photo.');
+      return;
+    }
+
+    // Build a data URL React Native's Image component can display directly
+    const mime = (asset.type ?? 'image/jpeg').toLowerCase().split(';')[0].trim();
+    setAvatarUrl(`data:${mime};base64,${asset.base64}`);
   }
 
-  function clearAvatar() {
-    setUrlInput('');
-    setAvatarUrl('');
+  function handleRemoveAvatar() {
     setAvatarModalVisible(false);
+    Alert.alert(
+      'Remove Avatar',
+      'Remove your current avatar photo?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => setAvatarUrl('') },
+      ],
+    );
   }
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={['bottom']}>
       <ScrollView contentContainerStyle={s.container}>
 
         {/* Header */}
@@ -65,7 +134,7 @@ export default function ProfileScreen() {
           {/* Avatar — tapping opens image URL modal; long-press opens emoji picker */}
           <TouchableOpacity
             style={s.avatarWrap}
-            onPress={() => { setUrlInput(state.avatarUrl); setUrlPreviewError(false); setAvatarModalVisible(true); }}
+            onPress={() => setAvatarModalVisible(true)}
             onLongPress={() => setEmojiModalVisible(true)}
             activeOpacity={0.8}
           >
@@ -76,10 +145,10 @@ export default function ProfileScreen() {
               style={s.avatarImage}
             />
             <View style={s.editAvatarTag}>
-              <Text style={s.editAvatarText}>✏️</Text>
+              <Text style={s.editAvatarText}>📷</Text>
             </View>
           </TouchableOpacity>
-          <Text style={s.avatarHint}>Tap to set image URL · Hold for emoji</Text>
+          <Text style={s.avatarHint}>Tap to change photo · Hold for emoji</Text>
 
           {/* Name row */}
           {editingName ? (
@@ -111,66 +180,48 @@ export default function ProfileScreen() {
           <Text style={s.userIdText}>ID: {state.currentUserId.slice(0, 8)}…</Text>
         </Card>
 
-        {/* Avatar URL modal */}
+        {/* Avatar picker action sheet */}
         <Modal
           visible={avatarModalVisible}
           transparent
           animationType="slide"
           onRequestClose={() => setAvatarModalVisible(false)}
         >
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={s.modalOverlay}>
             <View style={s.modalCard}>
-              <Text style={s.modalTitle}>Set Avatar Image</Text>
+              <Text style={s.modalTitle}>Change Avatar</Text>
               <Divider />
 
-              {/* Live preview */}
+              {/* Current avatar preview */}
               <View style={s.avatarPreviewWrap}>
-                {urlInput.trim() && !urlPreviewError ? (
-                  <Image
-                    source={{ uri: urlInput.trim() }}
-                    style={s.avatarPreview}
-                    onError={() => setUrlPreviewError(true)}
-                  />
-                ) : (
-                  <View style={[s.avatarPreview, s.avatarPreviewFallback]}>
-                    <Text style={{ fontSize: 44 }}>{state.profileEmoji}</Text>
-                    {urlPreviewError && (
-                      <Text style={s.previewError}>⚠️ Couldn't load image</Text>
-                    )}
-                  </View>
-                )}
+                <PlayerAvatar
+                  avatarUrl={state.avatarUrl}
+                  emoji={state.profileEmoji}
+                  size="lg"
+                />
               </View>
 
-              <Text style={s.urlLabel}>Image URL</Text>
-              <TextInput
-                style={s.urlInput}
-                value={urlInput}
-                onChangeText={v => { setUrlInput(v); setUrlPreviewError(false); }}
-                placeholder="https://example.com/avatar.png"
-                placeholderTextColor={Colors.textFaint}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="url"
-                selectionColor={Colors.gold}
-              />
+              {/* Actions */}
+              <TouchableOpacity style={s.actionRow} onPress={() => handlePickPhoto('library')}>
+                <Text style={s.actionIcon}>🖼️</Text>
+                <Text style={s.actionLabel}>Choose from Library</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.actionRow} onPress={() => handlePickPhoto('camera')}>
+                <Text style={s.actionIcon}>📷</Text>
+                <Text style={s.actionLabel}>Take Photo</Text>
+              </TouchableOpacity>
+              {state.avatarUrl ? (
+                <TouchableOpacity style={[s.actionRow, s.actionRowDanger]} onPress={handleRemoveAvatar}>
+                  <Text style={s.actionIcon}>🗑️</Text>
+                  <Text style={[s.actionLabel, s.actionLabelDanger]}>Remove Photo</Text>
+                </TouchableOpacity>
+              ) : null}
 
-              <View style={s.modalBtns}>
-                <TouchableOpacity style={s.saveBtn} onPress={saveAvatarUrl}>
-                  <Text style={s.saveBtnText}>Save</Text>
-                </TouchableOpacity>
-                {state.avatarUrl ? (
-                  <TouchableOpacity style={s.clearBtn} onPress={clearAvatar}>
-                    <Text style={s.clearBtnText}>Remove</Text>
-                  </TouchableOpacity>
-                ) : null}
-                <TouchableOpacity style={s.cancelBtn} onPress={() => setAvatarModalVisible(false)}>
-                  <Text style={s.cancelBtnText}>✕</Text>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity style={s.closeBtn} onPress={() => setAvatarModalVisible(false)}>
+                <Text style={s.closeBtnText}>Cancel</Text>
+              </TouchableOpacity>
             </View>
           </View>
-          </KeyboardAvoidingView>
         </Modal>
 
         {/* Emoji picker modal (fallback avatar) */}
@@ -205,6 +256,47 @@ export default function ProfileScreen() {
             </View>
           </View>
         </Modal>
+
+        {/* Lifetime stats */}
+        {lifetimeStats && (
+          <Card gold style={s.statsCard}>
+            <Text style={s.statsTitle}>📊 Lifetime Stats</Text>
+            <View style={s.statsGrid}>
+              <View style={s.statCell}>
+                <Text style={s.statValue}>{lifetimeStats.totalWins}W / {lifetimeStats.totalLosses}L</Text>
+                <Text style={s.statLabel}>ALL-TIME RECORD</Text>
+              </View>
+              <View style={s.statCell}>
+                <Text style={s.statValue}>{lifetimeStats.winRate}%</Text>
+                <Text style={s.statLabel}>WIN RATE</Text>
+              </View>
+              <View style={s.statCell}>
+                <Text style={s.statValue}>{history.length}</Text>
+                <Text style={s.statLabel}>TOURNAMENTS</Text>
+              </View>
+              {lifetimeStats.avgPlacement && (
+                <View style={s.statCell}>
+                  <Text style={s.statValue}>Top {lifetimeStats.avgPlacement}%</Text>
+                  <Text style={s.statLabel}>AVG PLACEMENT</Text>
+                </View>
+              )}
+            </View>
+            {(lifetimeStats.mostPlayed || lifetimeStats.bestFormat) && (
+              <View style={s.statsFooter}>
+                {lifetimeStats.mostPlayed && (
+                  <Text style={s.statsFooterText}>
+                    Most played: {lifetimeStats.fmtMeta(lifetimeStats.mostPlayed)?.icon} {lifetimeStats.fmtMeta(lifetimeStats.mostPlayed)?.name}
+                  </Text>
+                )}
+                {lifetimeStats.bestFormat && lifetimeStats.bestFormat !== lifetimeStats.mostPlayed && (
+                  <Text style={s.statsFooterText}>
+                    Best format: {lifetimeStats.fmtMeta(lifetimeStats.bestFormat)?.icon} {lifetimeStats.fmtMeta(lifetimeStats.bestFormat)?.name}
+                  </Text>
+                )}
+              </View>
+            )}
+          </Card>
+        )}
 
         {/* Tournament History */}
         <SectionHeader style={s.sectionHeader}>🏆 Tournament History</SectionHeader>
@@ -311,43 +403,29 @@ const s = StyleSheet.create({
     right: -6,
     backgroundColor: Colors.bgSurface,
     borderRadius: Radius.full,
-    width: 24,
-    height: 24,
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: Colors.borderGold,
   },
-  editAvatarText: { fontSize: 12 },
+editAvatarText: { fontSize: 14 },
 
-  // Avatar URL modal
-  avatarPreviewWrap: { alignItems: 'center', marginVertical: Spacing.md },
-  avatarPreview: { width: 100, height: 100, borderRadius: 50, borderWidth: 2, borderColor: Colors.borderGold },
-  avatarPreviewFallback: { backgroundColor: Colors.bgSurface, alignItems: 'center', justifyContent: 'center' },
-  previewError: { ...Typography.bodySM, color: Colors.redLight, marginTop: 4, textAlign: 'center' },
-  urlLabel: { ...Typography.labelSM, color: Colors.textFaint, marginBottom: 4 },
-  urlInput: {
-    fontFamily: 'Georgia',
-    fontSize: 13,
-    color: Colors.text,
-    backgroundColor: Colors.bgSurface,
-    borderWidth: 1,
-    borderColor: Colors.borderGold,
+  // Avatar picker modal
+  avatarPreviewWrap: { alignItems: 'center', marginVertical: Spacing.lg },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
     borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 8,
-    marginBottom: Spacing.md,
   },
-  modalBtns: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'center' },
-  clearBtn: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: Colors.redLight,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 8,
-  },
-  clearBtnText: { color: Colors.redLight, fontWeight: '600', fontSize: 13 },
+  actionRowDanger: { marginTop: 4 },
+  actionIcon: { fontSize: 22, width: 30, textAlign: 'center' },
+  actionLabel: { ...Typography.bodyMD, color: Colors.text },
+  actionLabelDanger: { color: Colors.redLight },
 
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: 6 },
   nameText: { fontFamily: 'Georgia', fontSize: 20, color: Colors.text },
@@ -443,4 +521,21 @@ const s = StyleSheet.create({
   historyStatValue: { fontFamily: 'Georgia', fontSize: 16, color: Colors.text },
   deckNameText: { ...Typography.bodySM, color: Colors.textMuted, maxWidth: 70, textAlign: 'center' },
   historyPlayers: { ...Typography.bodySM, color: Colors.textFaint, lineHeight: 18 },
+
+  // Lifetime stats
+  statsCard: { marginBottom: Spacing.lg },
+  statsTitle: { fontFamily: 'Georgia', fontSize: 16, color: Colors.gold, marginBottom: Spacing.md },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  statCell: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: Colors.bgSurface,
+    borderRadius: Radius.md,
+    padding: Spacing.sm,
+    alignItems: 'center',
+  },
+  statValue: { fontFamily: 'Georgia', fontSize: 18, color: Colors.text },
+  statLabel: { ...Typography.labelSM, color: Colors.textFaint, marginTop: 2 },
+  statsFooter: { marginTop: Spacing.sm, gap: 2 },
+  statsFooterText: { ...Typography.bodySM, color: Colors.textMuted },
 });
