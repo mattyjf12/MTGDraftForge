@@ -64,6 +64,36 @@ if [ -f "$BOOST_PODSPEC" ]; then
   echo "Patched boost podspec."
 fi
 
+# --- clear any proxy settings that Xcode Cloud may have inherited ---
+# Without this, git-sourced pods (e.g. DoubleConversion) get routed through
+# an internal proxy that doesn't exist in the Xcode Cloud network, causing
+# "Failed to connect to <ip> port 8088" errors during pod install.
+echo "Clearing git proxy settings..."
+git config --global --unset http.proxy  2>/dev/null || true
+git config --global --unset https.proxy 2>/dev/null || true
+git config --global --unset http.https://github.com.proxy 2>/dev/null || true
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
+
+# --- pre-download DoubleConversion to bypass git proxy issues ---
+# DoubleConversion.podspec clones from github via git; swap it to a direct
+# HTTP tarball download so no git network access is needed during pod install.
+DC_VERSION="1.1.6"
+DC_URL="https://github.com/google/double-conversion/archive/refs/tags/v${DC_VERSION}.tar.gz"
+DC_TAR="/tmp/double-conversion-${DC_VERSION}.tar.gz"
+DC_PODSPEC="$CI_PRIMARY_REPOSITORY_PATH/node_modules/react-native/third-party-podspecs/DoubleConversion.podspec"
+
+if [ -f "$DC_PODSPEC" ]; then
+  echo "Downloading DoubleConversion v${DC_VERSION}..."
+  curl -fL "$DC_URL" -o "$DC_TAR"
+  echo "Patching DoubleConversion podspec to use local tarball..."
+  # Replace the :git/:tag source with a local :http file URL so CocoaPods
+  # never calls git for this pod.
+  sed -i '' \
+    "s|{ :git => 'https://github.com/google/double-conversion.git',.*:tag => \"v#{spec.version}\" }|{ :http => 'file://${DC_TAR}' }|g" \
+    "$DC_PODSPEC"
+  echo "Patched DoubleConversion podspec."
+fi
+
 # --- pod install ---
 echo "=== pod install ==="
 cd "$CI_PRIMARY_REPOSITORY_PATH/ios"
